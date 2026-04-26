@@ -205,7 +205,7 @@ def _try_parse_json(raw: str) -> dict | None:
     except json.JSONDecodeError:
         pass
     # 2. Response was cut mid-stream: try closing with common suffixes
-    for suffix in ["}", "}}", "}]}", "}]}}", "}]}}}"]]:
+    for suffix in ["}", "}}", "}]}", "}]}}", "}]}}}}"]:
         try:
             return json.loads(raw + suffix)
         except json.JSONDecodeError:
