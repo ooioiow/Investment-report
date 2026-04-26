@@ -6,6 +6,7 @@ Runs every Sunday at 20:00 Taipei time (12:00 UTC via GitHub Actions)
 
 import os
 import json
+import html as _html_lib
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -196,6 +197,29 @@ def select_weekly_concept() -> str:
 # Claude AI Analysis
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _try_parse_json(raw: str) -> dict | None:
+    """Try to parse JSON, including simple repairs for truncated responses."""
+    # 1. Parse as-is
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    # 2. Response was cut mid-stream: try closing with common suffixes
+    for suffix in ["}", "}}", "}]}", "}]}}", "}]}}}"]]:
+        try:
+            return json.loads(raw + suffix)
+        except json.JSONDecodeError:
+            continue
+    # 3. Truncate to last complete top-level closing brace
+    last_brace = raw.rfind("}")
+    if last_brace > 0:
+        try:
+            return json.loads(raw[: last_brace + 1])
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
 def generate_report(market_data: list, news: list, sector_data: list, concept: str) -> dict:
     """Send all collected data to Claude and receive structured JSON analysis."""
 
@@ -281,7 +305,7 @@ def generate_report(market_data: list, news: list, sector_data: list, concept: s
 
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=4096,
+        max_tokens=8192,
         temperature=0.65,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -292,16 +316,55 @@ def generate_report(market_data: list, news: list, sector_data: list, concept: s
         lines = raw.splitlines()
         raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"JSON parse error: {e}\nRaw (first 600 chars): {raw[:600]}")
-        return {"error": "AI 分析生成失敗，請稍後重試", "raw": raw}
+    # Try parsing, then attempt lightweight repairs for truncated responses
+    parsed = _try_parse_json(raw)
+    if parsed is not None:
+        return parsed
+
+    print(f"JSON parse failed after repair attempts. Raw (first 300 chars): {raw[:300]}")
+    return {"_fallback_raw": raw, "report_date": today}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HTML Email Builder
 # ══════════════════════════════════════════════════════════════════════════════
+
+def _build_fallback_html(raw_text: str, date_str: str) -> str:
+    """Render the raw Claude response as a readable HTML email when JSON parsing fails."""
+    escaped = _html_lib.escape(raw_text)
+    # Convert blank lines to paragraph breaks for readability
+    paragraphs = "".join(
+        f"<p style='margin:0 0 12px;line-height:1.8;'>{line}</p>" if line.strip() else "<br>"
+        for line in escaped.splitlines()
+    )
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return f"""<!DOCTYPE html>
+<html lang="zh-TW">
+<head><meta charset="UTF-8"><title>投資學習週報 {date_str}</title></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:'Helvetica Neue',Arial,'PingFang TC',sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;">
+<tr><td align="center" style="padding:20px 16px;">
+<table width="660" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+<tr><td style="background:linear-gradient(135deg,#1e3a5f,#2563eb);padding:32px 40px;text-align:center;">
+  <div style="font-size:28px;font-weight:700;color:#fff;margin-bottom:8px;">📊 投資學習週報</div>
+  <div style="font-size:14px;color:#bfdbfe;">{date_str}</div>
+</td></tr>
+<tr><td style="padding:32px 40px;">
+  <div style="font-size:14px;color:#374151;">{paragraphs}</div>
+  <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e5e7eb;margin-top:32px;padding-top:20px;">
+  <tr><td style="text-align:center;font-size:12px;color:#9ca3af;line-height:2;">
+    本報告由 AI 輔助生成，僅供學習參考，不構成任何投資建議。<br>
+    數據來源：Yahoo Finance (yfinance) · Anthropic Claude Haiku · RSS 新聞<br>
+    生成時間：{ts}
+  </td></tr>
+  </table>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
 
 def _pct_color(pct):
     if pct is None:
@@ -318,13 +381,8 @@ VERDICT_COLOR = {"偏貴": "#dc2626", "合理": "#d97706", "偏便宜": "#16a34a
 
 
 def build_html_email(report: dict) -> str:
-    if "error" in report:
-        return (
-            "<html><body style='font-family:Arial;padding:20px;'>"
-            f"<h2>⚠ 報告生成失敗</h2><p>{report['error']}</p>"
-            f"<pre style='font-size:12px;color:#666'>{report.get('raw','')[:2000]}</pre>"
-            "</body></html>"
-        )
+    if "_fallback_raw" in report:
+        return _build_fallback_html(report["_fallback_raw"], report.get("report_date", ""))
 
     date_str = report.get("report_date", datetime.now().strftime("%Y年%m月%d日"))
 
