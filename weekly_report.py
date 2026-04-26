@@ -13,16 +13,15 @@ from datetime import datetime, timedelta, timezone
 
 import yfinance as yf
 import feedparser
-from google import genai
-from google.genai import types
+import anthropic
 
 # ── Config from environment variables ─────────────────────────────────────────
-GEMINI_API_KEY     = os.environ["GEMINI_API_KEY"]
+ANTHROPIC_API_KEY  = os.environ["ANTHROPIC_API_KEY"]
 GMAIL_USER         = os.environ["GMAIL_USER"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 RECIPIENT_EMAIL    = os.environ["RECIPIENT_EMAIL"]
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # ── Market Indices ─────────────────────────────────────────────────────────────
 MARKET_INDICES = [
@@ -194,11 +193,11 @@ def select_weekly_concept() -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Gemini AI Analysis
+# Claude AI Analysis
 # ══════════════════════════════════════════════════════════════════════════════
 
 def generate_report(market_data: list, news: list, sector_data: list, concept: str) -> dict:
-    """Send all collected data to Gemini and receive structured JSON analysis."""
+    """Send all collected data to Claude and receive structured JSON analysis."""
 
     market_text = "\n".join(
         f"- {d['label']} ({d['ticker']}): 現值 {d.get('current','N/A')}, 週漲跌 {d.get('change_pct','N/A')}%"
@@ -280,18 +279,15 @@ def generate_report(market_data: list, news: list, sector_data: list, concept: s
 }}
 """
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            temperature=0.65,
-            max_output_tokens=4096,
-            response_mime_type="application/json",
-        ),
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=4096,
+        temperature=0.65,
+        messages=[{"role": "user", "content": prompt}],
     )
 
-    raw = response.text.strip()
-    # Strip markdown fences if model ignores mime type
+    raw = response.content[0].text.strip()
+    # Strip markdown fences if model wraps output in ```json
     if raw.startswith("```"):
         lines = raw.splitlines()
         raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
@@ -535,7 +531,7 @@ def build_html_email(report: dict) -> str:
 <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e5e7eb;margin-top:32px;padding-top:20px;">
 <tr><td style="text-align:center;font-size:12px;color:#9ca3af;line-height:2;">
   本報告由 AI 輔助生成，僅供學習參考，不構成任何投資建議。<br>
-  數據來源：Yahoo Finance (yfinance) · Google Gemini 2.0 Flash · RSS 新聞<br>
+  數據來源：Yahoo Finance (yfinance) · Anthropic Claude Haiku · RSS 新聞<br>
   生成時間：{datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
 </td></tr>
 </table>
@@ -592,7 +588,7 @@ def main():
     print("  [4/5] Fetching sector stock data...")
     sector_data = fetch_sector_data(sectors)
 
-    print("  [5/5] Generating AI analysis (Gemini)...")
+    print("  [5/5] Generating AI analysis (Claude Haiku)...")
     report = generate_report(market_data, news, sector_data, concept)
 
     html = build_html_email(report)
