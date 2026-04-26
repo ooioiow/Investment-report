@@ -13,7 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 import yfinance as yf
 import feedparser
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 # ── Config from environment variables ─────────────────────────────────────────
 GEMINI_API_KEY     = os.environ["GEMINI_API_KEY"]
@@ -21,8 +22,7 @@ GMAIL_USER         = os.environ["GMAIL_USER"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 RECIPIENT_EMAIL    = os.environ["RECIPIENT_EMAIL"]
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # ── Market Indices ─────────────────────────────────────────────────────────────
 MARKET_INDICES = [
@@ -280,9 +280,10 @@ def generate_report(market_data: list, news: list, sector_data: list, concept: s
 }}
 """
 
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.types.GenerationConfig(
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
             temperature=0.65,
             max_output_tokens=4096,
             response_mime_type="application/json",
@@ -534,7 +535,7 @@ def build_html_email(report: dict) -> str:
 <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e5e7eb;margin-top:32px;padding-top:20px;">
 <tr><td style="text-align:center;font-size:12px;color:#9ca3af;line-height:2;">
   本報告由 AI 輔助生成，僅供學習參考，不構成任何投資建議。<br>
-  數據來源：Yahoo Finance (yfinance) · Google Gemini 1.5 Flash · RSS 新聞<br>
+  數據來源：Yahoo Finance (yfinance) · Google Gemini 2.0 Flash · RSS 新聞<br>
   生成時間：{datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
 </td></tr>
 </table>
