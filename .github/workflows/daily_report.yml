@@ -6,13 +6,20 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch:
 
+# 給 Actions 寫入 repo 的權限，用來自動 commit 今日問題
+permissions:
+  contents: write
+
 jobs:
   send-report:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -30,3 +37,11 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL:    ${{ secrets.RECIPIENT_EMAIL }}
         run: python daily_report.py
+
+      - name: Commit today's question for tomorrow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add yesterday_question.json
+          git diff --staged --quiet || git commit -m "chore: update yesterday_question [skip ci]"
+          git push
