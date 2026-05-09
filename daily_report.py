@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 """
 Investment Learning Daily Report
-Runs every day at 00:00 UTC = 08:00 Taipei time via GitHub Actions
-
-修正：
-- 殖利率改用 dividendRate ÷ 現價自己計算，加 >20% 異常過濾
-- 昨日問題從 yesterday_question.json 讀取，跑完後自動更新
+- 第一層產業：每日輪換（系統性學習）
+- 第二層產業：當日熱點（由 Claude 根據新聞判斷）
 """
 
 import os
@@ -28,10 +25,9 @@ GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 RECIPIENT_EMAIL    = os.environ["RECIPIENT_EMAIL"]
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
 QUESTION_FILE = Path("yesterday_question.json")
 
-# ── 你的持倉 ───────────────────────────────────────────────────────────────────
+# ── 持倉 ───────────────────────────────────────────────────────────────────────
 MY_HOLDINGS = [
     {"ticker": "0050.TW", "name": "元大台灣50"},
     {"ticker": "2618.TW", "name": "長榮航"},
@@ -45,7 +41,7 @@ MARKET_INDICES = [
     {"label": "VIX 恐慌指數","ticker": "^VIX"},
 ]
 
-# ── 台股產業輪換 ───────────────────────────────────────────────────────────────
+# ── 輪換產業（每天一個，系統性學習）──────────────────────────────────────────
 ALL_SECTORS = [
     {"name": "航運業",      "tickers": ["2603.TW","2609.TW","2615.TW"], "desc": "長榮、陽明、萬海，台灣三大航運龍頭"},
     {"name": "半導體",      "tickers": ["2330.TW","2303.TW"],           "desc": "台積電、聯電，台灣護國神山"},
@@ -64,7 +60,21 @@ ALL_SECTORS = [
     {"name": "食品飲料",    "tickers": ["1216.TW","1210.TW"],           "desc": "統一、大成，民生必需品"},
 ]
 
-# ── 每日投資概念 ───────────────────────────────────────────────────────────────
+# 熱點產業候選（Claude 從這裡選一個，並帶入對應股票）
+HOT_SECTOR_CANDIDATES = {
+    "航運業":      {"tickers": ["2603.TW","2609.TW","2615.TW"], "desc": "長榮、陽明、萬海"},
+    "半導體":      {"tickers": ["2330.TW","2303.TW"],           "desc": "台積電、聯電"},
+    "AI伺服器":    {"tickers": ["2317.TW","3231.TW"],           "desc": "鴻海、緯創"},
+    "金融保險":    {"tickers": ["2882.TW","2891.TW"],           "desc": "國泰金、中信金"},
+    "電動車":      {"tickers": ["2308.TW","6213.TW"],           "desc": "台達電、聯茂"},
+    "生技醫療":    {"tickers": ["4743.TW","1786.TW"],           "desc": "合一、科妍"},
+    "鋼鐵原物料":  {"tickers": ["2002.TW","2008.TW"],           "desc": "中鋼、高興昌"},
+    "電信":        {"tickers": ["2412.TW","3045.TW"],           "desc": "中華電、台灣大"},
+    "DRAM記憶體":  {"tickers": ["4256.TW","3474.TW"],           "desc": "南亞科、華邦電"},
+    "觀光餐飲":    {"tickers": ["2618.TW","2707.TW"],           "desc": "長榮航、晶華"},
+}
+
+# ── 每日概念 ───────────────────────────────────────────────────────────────────
 INVESTMENT_CONCEPTS = [
     ("本益比 P/E Ratio",          "判斷股票貴不貴最基本的工具，現在股價是每年獲利的幾倍？"),
     ("殖利率 Dividend Yield",     "每年配息÷股價，數字越高代表現金回報越豐厚"),
@@ -90,10 +100,10 @@ INVESTMENT_CONCEPTS = [
     ("CPI通膨指標",               "物價上漲速度，影響央行政策和企業成本"),
     ("PMI採購經理人指數",         "超過50代表製造業擴張，低於50代表收縮"),
     ("失業率",                    "就業市場強弱是消費力的基礎，影響企業獲利"),
-    ("RSI相對強弱指標",           "0-100的指標，低於30可能超賣，高於70可能超買，輔助找買賣點"),
+    ("RSI相對強弱指標",           "0-100的指標，低於30可能超賣，高於70可能超買"),
     ("移動平均線 MA",             "平滑價格波動，判斷趨勢方向，黃金交叉是漲訊號"),
-    ("成交量",                    "價漲量增是健康上漲，價漲量縮要小心，成交量是市場情緒的溫度計"),
-    ("價值投資",                  "以低於內在價值的價格買入，等市場回歸理性，巴菲特的核心方法"),
+    ("成交量",                    "價漲量增是健康上漲，價漲量縮要小心"),
+    ("價值投資",                  "以低於內在價值的價格買入，等市場回歸理性"),
     ("成長投資",                  "買高速成長的公司，願意付出更高估值換取未來獲利"),
     ("安全邊際",                  "買入價格要遠低於估算的內在價值，給自己犯錯的空間"),
     ("分散投資",                  "不把雞蛋放在同一個籃子，降低單一股票風險"),
@@ -128,10 +138,8 @@ def load_yesterday_question() -> str:
 
 def save_todays_question(question: str) -> None:
     QUESTION_FILE.write_text(
-        json.dumps(
-            {"question": question, "date": datetime.now().strftime("%Y-%m-%d")},
-            ensure_ascii=False, indent=2
-        ),
+        json.dumps({"question": question, "date": datetime.now().strftime("%Y-%m-%d")},
+                   ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
     print(f"💾 今日問題已存檔：{question[:60]}...")
@@ -164,14 +172,11 @@ def compute_ma(closes: list, period: int) -> float | None:
 
 
 def safe_div_yield(info: dict, current_price: float) -> float | None:
-    """用 dividendRate ÷ 現價自己算殖利率，>20% 視為異常回傳 None"""
     rate = info.get("dividendRate")
     if not rate or not current_price or current_price == 0:
         return None
     result = round((rate / current_price) * 100, 2)
-    if result > 20:
-        return None
-    return result
+    return None if result > 20 else result
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -180,25 +185,21 @@ def safe_div_yield(info: dict, current_price: float) -> float | None:
 
 def fetch_market_data() -> list:
     results = []
-    end   = datetime.now(timezone.utc)
+    end = datetime.now(timezone.utc)
     start = end - timedelta(days=10)
     for item in MARKET_INDICES:
         try:
             hist = yf.Ticker(item["ticker"]).history(
-                start=start.strftime("%Y-%m-%d"),
-                end=end.strftime("%Y-%m-%d"),
-            )
+                start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"))
             if hist.empty or len(hist) < 2:
                 results.append({"label": item["label"], "error": "資料不足"})
                 continue
-            current    = float(hist["Close"].iloc[-1])
-            prev       = float(hist["Close"].iloc[-2])
-            change_pct = (current - prev) / prev * 100
+            current = float(hist["Close"].iloc[-1])
+            prev    = float(hist["Close"].iloc[-2])
             results.append({
-                "label":      item["label"],
-                "ticker":     item["ticker"],
-                "current":    round(current, 2),
-                "change_pct": round(change_pct, 2),
+                "label": item["label"], "ticker": item["ticker"],
+                "current": round(current, 2),
+                "change_pct": round((current - prev) / prev * 100, 2),
             })
         except Exception as e:
             results.append({"label": item["label"], "error": str(e)})
@@ -228,47 +229,42 @@ def fetch_holdings_data() -> list:
             if w52h and w52l and w52h != w52l:
                 pos_pct = round((current - w52l) / (w52h - w52l) * 100, 1)
             results.append({
-                "ticker":              holding["ticker"],
-                "name":                holding["name"],
-                "current":             round(current, 2),
-                "change_pct":          round(change_pct, 2),
-                "rsi":                 rsi,
-                "ma20":                ma20,
-                "ma60":                ma60,
-                "above_ma20":          current > ma20 if ma20 else None,
-                "above_ma60":          current > ma60 if ma60 else None,
-                "week52_high":         round(w52h, 2) if w52h else None,
-                "week52_low":          round(w52l, 2) if w52l else None,
+                "ticker": holding["ticker"], "name": holding["name"],
+                "current": round(current, 2), "change_pct": round(change_pct, 2),
+                "rsi": rsi, "ma20": ma20, "ma60": ma60,
+                "above_ma20": current > ma20 if ma20 else None,
+                "above_ma60": current > ma60 if ma60 else None,
                 "position_in_52w_pct": pos_pct,
-                "pe":                  round(info.get("trailingPE"), 1) if info.get("trailingPE") else None,
-                "div_yield_pct":       safe_div_yield(info, current),
+                "pe": round(info.get("trailingPE"), 1) if info.get("trailingPE") else None,
+                "div_yield_pct": safe_div_yield(info, current),
             })
         except Exception as e:
             results.append({**holding, "error": str(e)})
     return results
 
 
-def fetch_sector_data(sector: dict) -> dict:
+def fetch_sector_stocks(tickers: list) -> list:
     stocks = []
-    for ticker_str in sector["tickers"]:
+    for ticker_str in tickers:
         try:
             t    = yf.Ticker(ticker_str)
             info = t.info
             hist = t.history(period="3mo")
             closes  = [float(x) for x in hist["Close"].tolist()] if not hist.empty else []
             current = closes[-1] if closes else None
+            ma20_val = compute_ma(closes, 20)
             stocks.append({
                 "ticker":    ticker_str,
                 "name":      info.get("longName") or info.get("shortName") or ticker_str,
                 "current":   round(current, 2) if current else None,
                 "rsi":       compute_rsi(closes) if closes else None,
-                "ma20":      round(compute_ma(closes, 20), 2) if compute_ma(closes, 20) else None,
+                "ma20":      round(ma20_val, 2) if ma20_val else None,
                 "pe":        round(info.get("trailingPE"), 1) if info.get("trailingPE") else None,
                 "div_yield": safe_div_yield(info, current) if current else None,
             })
         except Exception as e:
             stocks.append({"ticker": ticker_str, "error": str(e)})
-    return {**sector, "stocks": stocks}
+    return stocks
 
 
 def fetch_news(max_items: int = 12) -> list:
@@ -287,7 +283,7 @@ def fetch_news(max_items: int = 12) -> list:
     return news[:max_items]
 
 
-def select_today_sector() -> dict:
+def select_today_rotation_sector() -> dict:
     return ALL_SECTORS[datetime.now().timetuple().tm_yday % len(ALL_SECTORS)]
 
 
@@ -296,7 +292,48 @@ def select_today_concept() -> tuple:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Claude AI 分析
+# Claude 判斷熱點產業
+# ══════════════════════════════════════════════════════════════════════════════
+
+def detect_hot_sector(news: list) -> dict:
+    """讓 Claude 根據今日新聞判斷最熱門的台股產業，從候選清單選一個"""
+    candidates = list(HOT_SECTOR_CANDIDATES.keys())
+    news_text  = "\n".join(f"- {n['title']}" for n in news[:10])
+
+    prompt = f"""根據以下今日財經新聞標題，判斷今天台股最受關注的產業。
+只能從這個清單選一個：{candidates}
+新聞：
+{news_text}
+
+只輸出產業名稱，不要其他文字。例如：半導體"""
+
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=20,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        sector_name = response.content[0].text.strip()
+        if sector_name in HOT_SECTOR_CANDIDATES:
+            candidate = HOT_SECTOR_CANDIDATES[sector_name]
+            return {
+                "name":    sector_name,
+                "desc":    candidate["desc"],
+                "tickers": candidate["tickers"],
+                "stocks":  fetch_sector_stocks(candidate["tickers"]),
+            }
+    except Exception as e:
+        print(f"Hot sector detection failed: {e}")
+
+    # fallback：用輪換產業的下一個
+    fallback_idx = (datetime.now().timetuple().tm_yday + 1) % len(ALL_SECTORS)
+    fallback = ALL_SECTORS[fallback_idx]
+    return {**fallback, "stocks": fetch_sector_stocks(fallback["tickers"])}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# JSON 修復
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _try_parse_json(raw: str) -> dict | None:
@@ -318,8 +355,13 @@ def _try_parse_json(raw: str) -> dict | None:
     return None
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Claude AI 主分析
+# ══════════════════════════════════════════════════════════════════════════════
+
 def generate_report(
-    market_data, holdings_data, sector_data, news, concept, yesterday_question
+    market_data, holdings_data, rotation_sector_data, hot_sector_data,
+    news, concept, yesterday_question
 ) -> dict:
     today = datetime.now(timezone.utc).astimezone(
         timezone(timedelta(hours=8))
@@ -327,13 +369,14 @@ def generate_report(
     concept_name, concept_hint = concept
 
     prompt = f"""
-你是一位專業的台股投資教育者，幫助一位剛入門的大學生每天學習投資。
-請用繁體中文，語氣親切直接，不要廢話。
+你是台股投資教育者，幫助一位剛入門的大學生每天學習投資。
+用繁體中文，語氣親切直接，不廢話。
 
 今日日期：{today}
 【大盤】{json.dumps(market_data, ensure_ascii=False)}
 【持倉】{json.dumps(holdings_data, ensure_ascii=False)}
-【產業：{sector_data['name']}】{json.dumps(sector_data, ensure_ascii=False)}
+【輪換產業：{rotation_sector_data['name']}】{json.dumps(rotation_sector_data, ensure_ascii=False)}
+【今日熱點產業：{hot_sector_data['name']}】{json.dumps(hot_sector_data, ensure_ascii=False)}
 【新聞】{json.dumps(news[:10], ensure_ascii=False)}
 【概念】{concept_name}：{concept_hint}
 【昨日問題】{yesterday_question}
@@ -341,41 +384,48 @@ def generate_report(
 輸出以下 JSON，不含任何 markdown 或額外文字：
 {{
   "report_date": "{today}",
-  "market_summary": [{{"label":"指數","current":數字,"change_pct":數字,"one_line":"20字內解讀"}}],
+  "market_summary": [{{"label":"指數","current":數字,"change_pct":數字,"one_line":"20字內"}}],
   "holdings": [{{
     "ticker":"代號","name":"名稱","current":數字,"change_pct":數字,
     "rsi":數字或null,"ma20":數字或null,"ma60":數字或null,
     "above_ma20":true或false或null,"above_ma60":true或false或null,
     "position_in_52w_pct":數字或null,"div_yield_pct":數字或null,
     "rsi_interpretation":"30字內","ma_interpretation":"30字內",
-    "overall_status":"40字內總結"
+    "overall_status":"40字內"
   }}],
-  "sector_today": {{
-    "name":"產業名","desc":"簡介","trend":"100字內趨勢",
+  "rotation_sector": {{
+    "name":"產業名","desc":"簡介","trend":"100字內",
     "stocks":[{{"ticker":"代號","name":"名稱","current":數字或null,"rsi":數字或null,
       "pe":數字或null,"div_yield":數字或null,
-      "rsi_signal":"超買/中性/超賣","valuation":"偏貴/合理/偏便宜",
-      "one_line":"40字內"}}],
-    "key_insight":"60字內重點"
+      "rsi_signal":"超買/中性/超賣","valuation":"偏貴/合理/偏便宜","one_line":"40字內"}}],
+    "key_insight":"60字內"
   }},
-  "news_summary": [{{"title":"標題","impact":"30字內影響"}}],
+  "hot_sector": {{
+    "name":"產業名","why_hot":"為什麼今天這個產業是熱點，結合新聞說明，60字內",
+    "desc":"簡介","trend":"100字內",
+    "stocks":[{{"ticker":"代號","name":"名稱","current":數字或null,"rsi":數字或null,
+      "pe":數字或null,"div_yield":數字或null,
+      "rsi_signal":"超買/中性/超賣","valuation":"偏貴/合理/偏便宜","one_line":"40字內"}}],
+    "key_insight":"60字內"
+  }},
+  "news_summary": [{{"title":"標題","impact":"30字內"}}],
   "concept_today": {{
     "name":"{concept_name}","definition":"50字內","why_it_matters":"50字內",
-    "how_to_use":"80字內","todays_example":"80字內實例","key_takeaway":"20字內精華"
+    "how_to_use":"80字內","todays_example":"80字內","key_takeaway":"20字內"
   }},
   "yesterday_answer": {{
     "question":"{yesterday_question}",
-    "answer":"100字內解答","lesson":"50字內投資邏輯"
+    "answer":"100字內","lesson":"50字內"
   }},
   "todays_question": {{
-    "question":"根據今天數據出一個有明確答案的思考題，明天解答",
+    "question":"根據今天數據出一個有明確答案的思考題",
     "hint":"30字內提示，不直接給答案"
   }}
 }}"""
 
     response = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=4096,
+        max_tokens=5000,
         temperature=0.5,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -391,7 +441,7 @@ def generate_report(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HTML Email Builder
+# HTML Helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _pct_color(pct):
@@ -418,6 +468,63 @@ def _rsi_label(rsi):
 VERDICT_COLOR = {"偏貴": "#dc2626", "合理": "#d97706", "偏便宜": "#16a34a"}
 
 
+def _render_sector_block(sector: dict, accent_color: str, label: str, badge_fn) -> str:
+    """共用的產業區塊 HTML，輪換產業和熱點產業都用這個"""
+    why_hot = sector.get("why_hot", "")
+    html = f"""<table width='100%' cellpadding='0' cellspacing='0' style='border:1px solid #e0e7ff;border-radius:10px;overflow:hidden;margin-bottom:16px;'>
+<tr><td style='background:{accent_color};padding:14px 20px;border-bottom:1px solid #e0e7ff;'>
+  <div style='font-size:11px;color:rgba(255,255,255,0.7);margin-bottom:4px;'>{label}</div>
+  <div style='font-size:16px;font-weight:700;color:#fff;'>{sector.get('name','')}</div>
+  <div style='font-size:13px;color:rgba(255,255,255,0.85);margin-top:4px;'>{sector.get('desc','')}</div>
+</td></tr>"""
+
+    if why_hot:
+        html += f"""<tr><td style='background:#fef9c3;padding:10px 20px;border-bottom:1px solid #fde68a;'>
+  <span style='font-size:12px;font-weight:700;color:#92400e;'>🔥 為什麼今天熱：</span>
+  <span style='font-size:13px;color:#78350f;'>{why_hot}</span>
+</td></tr>"""
+
+    html += f"""<tr><td style='padding:14px 20px;'>
+  <div style='font-size:13px;color:#374151;line-height:1.7;margin-bottom:12px;'>{sector.get('trend','')}</div>"""
+
+    for stock in sector.get("stocks", []):
+        rsi = stock.get("rsi")
+        signal = stock.get("rsi_signal", "中性")
+        valuation = stock.get("valuation", "合理")
+        vcolor = VERDICT_COLOR.get(valuation, "#6b7280")
+        signal_color = {"超買": "#dc2626", "超賣": "#2563eb", "中性": "#16a34a"}.get(signal, "#6b7280")
+        div = stock.get("div_yield")
+        div_str = f"{div}%" if div else "資料待確認"
+
+        html += f"""<table width='100%' cellpadding='0' cellspacing='0' style='background:#f9fafb;border-radius:8px;margin-bottom:8px;'>
+<tr><td style='padding:12px 16px;'>
+  <table width='100%'><tr>
+    <td><span style='font-size:14px;font-weight:700;color:#1e3a5f;'>{stock.get('ticker','')} {stock.get('name','')}</span></td>
+    <td align='right'>
+      {badge_fn(signal, signal_color)}&nbsp;{badge_fn(valuation, vcolor)}
+    </td>
+  </tr></table>
+  <table width='100%' style='margin-top:8px;'><tr>
+    <td style='font-size:13px;color:#6b7280;'>RSI: <strong style='color:{_rsi_color(rsi)};'>{_rsi_label(rsi)}</strong></td>
+    <td style='font-size:13px;color:#6b7280;'>PE: <strong>{stock.get('pe','N/A')}</strong></td>
+    <td style='font-size:13px;color:#6b7280;'>殖利率: <strong>{div_str}</strong></td>
+  </tr></table>
+  <div style='font-size:13px;color:#374151;margin-top:8px;'>{stock.get('one_line','')}</div>
+</td></tr></table>"""
+
+    html += f"""</td></tr>
+<tr><td style='background:#f8fafc;padding:10px 20px;border-top:1px solid #e5e7eb;'>
+  <span style='font-size:12px;font-weight:700;color:#4f46e5;'>🔑 重點：</span>
+  <span style='font-size:13px;color:#374151;'>{sector.get('key_insight','')}</span>
+</td></tr></table>"""
+
+    return html
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HTML Email Builder
+# ══════════════════════════════════════════════════════════════════════════════
+
 def build_html_email(report: dict) -> str:
     if "_fallback_raw" in report:
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -425,7 +532,7 @@ def build_html_email(report: dict) -> str:
         return f"""<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"></head>
 <body style="font-family:sans-serif;padding:20px;"><h2>投資日報 {report.get('report_date','')}</h2>
 <pre style="white-space:pre-wrap;">{escaped}</pre>
-<p style="color:#9ca3af;font-size:12px;">生成時間：{ts}</p></body></html>"""
+<p style="color:#9ca3af;font-size:12px;">{ts}</p></body></html>"""
 
     date_str = report.get("report_date", "")
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -447,14 +554,13 @@ def build_html_email(report: dict) -> str:
 <tr><td style="background:linear-gradient(135deg,#1e3a5f,#1d4ed8);padding:28px 40px;text-align:center;">
   <div style="font-size:11px;color:#93c5fd;letter-spacing:3px;margin-bottom:6px;">DAILY INVESTMENT LEARNING</div>
   <div style="font-size:26px;font-weight:700;color:#fff;margin-bottom:6px;">📊 每日投資學習報告</div>
-  <div style="font-size:13px;color:#bfdbfe;">{date_str} · 每日 08:00 台北時間自動發送</div>
+  <div style="font-size:13px;color:#bfdbfe;">{date_str} · 每日 08:00 台北時間</div>
 </td></tr>
 <tr><td style="padding:28px 40px;">"""
 
     # 大盤
     html += section("📈 今日大盤概況", "#2563eb")
-    html += "<table width='100%' cellpadding='0' cellspacing='0' style='border-collapse:collapse;'>"
-    html += "<tr style='background:#f8fafc;'><td style='padding:8px 12px;font-size:12px;color:#6b7280;font-weight:700;'>指數</td><td style='padding:8px 12px;font-size:12px;color:#6b7280;font-weight:700;text-align:right;'>現值</td><td style='padding:8px 12px;font-size:12px;color:#6b7280;font-weight:700;text-align:right;'>漲跌</td><td style='padding:8px 12px;font-size:12px;color:#6b7280;font-weight:700;'>解讀</td></tr>"
+    html += "<table width='100%' cellpadding='0' cellspacing='0' style='border-collapse:collapse;'><tr style='background:#f8fafc;'><td style='padding:8px 12px;font-size:12px;color:#6b7280;font-weight:700;'>指數</td><td style='padding:8px 12px;font-size:12px;color:#6b7280;font-weight:700;text-align:right;'>現值</td><td style='padding:8px 12px;font-size:12px;color:#6b7280;font-weight:700;text-align:right;'>漲跌</td><td style='padding:8px 12px;font-size:12px;color:#6b7280;font-weight:700;'>解讀</td></tr>"
     for i, item in enumerate(report.get("market_summary", [])):
         bg = "#fff" if i % 2 == 0 else "#f8fafc"
         pct, cur = item.get("change_pct"), item.get("current")
@@ -464,9 +570,10 @@ def build_html_email(report: dict) -> str:
     # 持倉
     html += section("💼 我的持倉狀況", "#059669")
     for h in report.get("holdings", []):
-        pct, rsi, ma20, ma60 = h.get("change_pct"), h.get("rsi"), h.get("ma20"), h.get("ma60")
-        pos = h.get("position_in_52w_pct")
-        div = h.get("div_yield_pct")
+        pct, rsi = h.get("change_pct"), h.get("rsi")
+        ma20, ma60 = h.get("ma20"), h.get("ma60")
+        pos  = h.get("position_in_52w_pct")
+        div  = h.get("div_yield_pct")
         div_str = f"{div}%" if div else "資料待確認"
         html += f"""<table width='100%' cellpadding='0' cellspacing='0' style='border:1px solid #e5e7eb;border-radius:10px;margin-bottom:14px;overflow:hidden;'>
 <tr><td style='background:#f0fdf4;padding:14px 20px;border-bottom:1px solid #d1fae5;'>
@@ -477,26 +584,10 @@ def build_html_email(report: dict) -> str:
 </td></tr>
 <tr><td style='padding:14px 20px;'>
   <table width='100%'><tr>
-    <td width='25%' style='padding:6px 0;'>
-      <div style='font-size:11px;color:#6b7280;margin-bottom:3px;'>RSI (14)</div>
-      <div style='font-size:15px;font-weight:700;color:{_rsi_color(rsi)};'>{_rsi_label(rsi)}</div>
-      <div style='font-size:12px;color:#6b7280;margin-top:3px;'>{h.get('rsi_interpretation','')}</div>
-    </td>
-    <td width='30%' style='padding:6px 0;border-left:1px solid #f1f5f9;padding-left:12px;'>
-      <div style='font-size:11px;color:#6b7280;margin-bottom:3px;'>均線位置</div>
-      <div style='font-size:13px;font-weight:600;color:#374151;'>MA20: {ma20 or 'N/A'} {'✅' if h.get('above_ma20') else '⚠️' if h.get('above_ma20') is False else ''}</div>
-      <div style='font-size:13px;font-weight:600;color:#374151;'>MA60: {ma60 or 'N/A'} {'✅' if h.get('above_ma60') else '⚠️' if h.get('above_ma60') is False else ''}</div>
-      <div style='font-size:12px;color:#6b7280;margin-top:3px;'>{h.get('ma_interpretation','')}</div>
-    </td>
-    <td width='25%' style='padding:6px 0;border-left:1px solid #f1f5f9;padding-left:12px;'>
-      <div style='font-size:11px;color:#6b7280;margin-bottom:3px;'>52週區間</div>
-      <div style='font-size:15px;font-weight:700;color:#1e3a5f;'>{f'{pos:.0f}%' if pos is not None else 'N/A'}</div>
-      <div style='font-size:12px;color:#6b7280;'>{'接近年高' if pos and pos>70 else '接近年低' if pos and pos<30 else '中間區間'}</div>
-    </td>
-    <td width='20%' style='padding:6px 0;border-left:1px solid #f1f5f9;padding-left:12px;'>
-      <div style='font-size:11px;color:#6b7280;margin-bottom:3px;'>殖利率</div>
-      <div style='font-size:15px;font-weight:700;color:#059669;'>{div_str}</div>
-    </td>
+    <td width='25%' style='padding:6px 0;'><div style='font-size:11px;color:#6b7280;margin-bottom:3px;'>RSI (14)</div><div style='font-size:15px;font-weight:700;color:{_rsi_color(rsi)};'>{_rsi_label(rsi)}</div><div style='font-size:12px;color:#6b7280;margin-top:3px;'>{h.get('rsi_interpretation','')}</div></td>
+    <td width='30%' style='padding:6px 0;border-left:1px solid #f1f5f9;padding-left:12px;'><div style='font-size:11px;color:#6b7280;margin-bottom:3px;'>均線位置</div><div style='font-size:13px;font-weight:600;color:#374151;'>MA20: {ma20 or 'N/A'} {'✅' if h.get('above_ma20') else '⚠️' if h.get('above_ma20') is False else ''}</div><div style='font-size:13px;font-weight:600;color:#374151;'>MA60: {ma60 or 'N/A'} {'✅' if h.get('above_ma60') else '⚠️' if h.get('above_ma60') is False else ''}</div><div style='font-size:12px;color:#6b7280;margin-top:3px;'>{h.get('ma_interpretation','')}</div></td>
+    <td width='25%' style='padding:6px 0;border-left:1px solid #f1f5f9;padding-left:12px;'><div style='font-size:11px;color:#6b7280;margin-bottom:3px;'>52週區間</div><div style='font-size:15px;font-weight:700;color:#1e3a5f;'>{f'{pos:.0f}%' if pos is not None else 'N/A'}</div><div style='font-size:12px;color:#6b7280;'>{'接近年高' if pos and pos>70 else '接近年低' if pos and pos<30 else '中間區間'}</div></td>
+    <td width='20%' style='padding:6px 0;border-left:1px solid #f1f5f9;padding-left:12px;'><div style='font-size:11px;color:#6b7280;margin-bottom:3px;'>殖利率</div><div style='font-size:15px;font-weight:700;color:#059669;'>{div_str}</div></td>
   </tr></table>
   <div style='background:#eff6ff;border-radius:6px;padding:10px 14px;margin-top:12px;font-size:13px;color:#1e40af;'>💬 {h.get('overall_status','')}</div>
 </td></tr></table>"""
@@ -512,9 +603,7 @@ def build_html_email(report: dict) -> str:
     concept = report.get("concept_today", {})
     html += section("📚 今日投資概念", "#d97706")
     html += f"""<table width='100%' cellpadding='0' cellspacing='0' style='border:1px solid #fde68a;border-radius:10px;overflow:hidden;'>
-<tr><td style='background:linear-gradient(135deg,#78350f,#d97706);padding:14px 24px;'>
-  <div style='font-size:17px;font-weight:700;color:#fff;'>{concept.get('name','')}</div>
-</td></tr>
+<tr><td style='background:linear-gradient(135deg,#78350f,#d97706);padding:14px 24px;'><div style='font-size:17px;font-weight:700;color:#fff;'>{concept.get('name','')}</div></td></tr>
 <tr><td style='background:#fffbeb;padding:20px 24px;'>
   <table width='100%' cellpadding='0' cellspacing='0'>
   <tr><td style='padding:8px 0;border-bottom:1px solid #fde68a;'><div style='font-size:11px;color:#d97706;font-weight:700;margin-bottom:4px;'>📖 定義</div><div style='font-size:14px;color:#374151;line-height:1.7;'>{concept.get('definition','')}</div></td></tr>
@@ -530,14 +619,8 @@ def build_html_email(report: dict) -> str:
     if yesterday.get("answer"):
         html += section("✅ 昨日問題解答", "#059669")
         html += f"""<table width='100%' cellpadding='0' cellspacing='0' style='border:1px solid #d1fae5;border-radius:10px;overflow:hidden;'>
-<tr><td style='background:#f0fdf4;padding:12px 20px;border-bottom:1px solid #d1fae5;'>
-  <div style='font-size:12px;color:#6b7280;margin-bottom:4px;'>昨日問題</div>
-  <div style='font-size:14px;font-weight:600;color:#374151;'>{yesterday.get('question','')}</div>
-</td></tr>
-<tr><td style='padding:16px 20px;'>
-  <div style='font-size:14px;color:#374151;line-height:1.7;margin-bottom:10px;'>{yesterday.get('answer','')}</div>
-  <div style='background:#eff6ff;border-radius:6px;padding:10px 14px;font-size:13px;color:#1e40af;'>🎓 學到的投資邏輯：{yesterday.get('lesson','')}</div>
-</td></tr></table>"""
+<tr><td style='background:#f0fdf4;padding:12px 20px;border-bottom:1px solid #d1fae5;'><div style='font-size:12px;color:#6b7280;margin-bottom:4px;'>昨日問題</div><div style='font-size:14px;font-weight:600;color:#374151;'>{yesterday.get('question','')}</div></td></tr>
+<tr><td style='padding:16px 20px;'><div style='font-size:14px;color:#374151;line-height:1.7;margin-bottom:10px;'>{yesterday.get('answer','')}</div><div style='background:#eff6ff;border-radius:6px;padding:10px 14px;font-size:13px;color:#1e40af;'>🎓 學到的投資邏輯：{yesterday.get('lesson','')}</div></td></tr></table>"""
 
     # 今日提問
     todays_q = report.get("todays_question", {})
@@ -555,42 +638,17 @@ def build_html_email(report: dict) -> str:
   <span style='background:#f3f4f6;padding:4px 16px;font-size:13px;color:#6b7280;border-radius:20px;border:1px solid #e5e7eb;'>── 進階區（看不懂沒關係，慢慢會的）──</span>
 </td></tr></table>"""
 
-    sector = report.get("sector_today", {})
-    html += section(f"🏭 今日產業：{sector.get('name','')}", "#6366f1")
-    html += f"""<table width='100%' cellpadding='0' cellspacing='0' style='border:1px solid #e0e7ff;border-radius:10px;overflow:hidden;'>
-<tr><td style='background:#eef2ff;padding:14px 20px;border-bottom:1px solid #e0e7ff;'>
-  <div style='font-size:13px;color:#6b7280;margin-bottom:4px;'>{sector.get('desc','')}</div>
-  <div style='font-size:14px;color:#374151;line-height:1.7;'>{sector.get('trend','')}</div>
-</td></tr><tr><td style='padding:16px 20px;'>"""
+    html += section("🏭 今日產業分析", "#6366f1")
 
-    for stock in sector.get("stocks", []):
-        rsi = stock.get("rsi")
-        signal = stock.get("rsi_signal", "中性")
-        valuation = stock.get("valuation", "合理")
-        vcolor = VERDICT_COLOR.get(valuation, "#6b7280")
-        signal_color = {"超買": "#dc2626", "超賣": "#2563eb", "中性": "#16a34a"}.get(signal, "#6b7280")
-        div = stock.get("div_yield")
-        div_str = f"{div}%" if div else "資料待確認"
-        html += f"""<table width='100%' cellpadding='0' cellspacing='0' style='background:#f9fafb;border-radius:8px;margin-bottom:10px;'>
-<tr><td style='padding:12px 16px;'>
-  <table width='100%'><tr>
-    <td><span style='font-size:14px;font-weight:700;color:#1e3a5f;'>{stock.get('ticker','')} {stock.get('name','')}</span></td>
-    <td align='right'>{badge(signal, signal_color)}&nbsp;{badge(valuation, vcolor)}</td>
-  </tr></table>
-  <table width='100%' style='margin-top:8px;'><tr>
-    <td style='font-size:13px;color:#6b7280;'>RSI: <strong style='color:{_rsi_color(rsi)};'>{_rsi_label(rsi)}</strong></td>
-    <td style='font-size:13px;color:#6b7280;'>PE: <strong>{stock.get('pe','N/A')}</strong></td>
-    <td style='font-size:13px;color:#6b7280;'>殖利率: <strong>{div_str}</strong></td>
-  </tr></table>
-  <div style='font-size:13px;color:#374151;margin-top:8px;'>{stock.get('one_line','')}</div>
-</td></tr></table>"""
+    # 輪換產業
+    rotation = report.get("rotation_sector", {})
+    html += _render_sector_block(rotation, "#4f46e5", "📅 今日輪換產業（系統性學習）", badge)
 
-    html += f"""</td></tr>
-<tr><td style='background:#eef2ff;padding:12px 20px;border-top:1px solid #e0e7ff;'>
-  <span style='font-size:12px;font-weight:700;color:#4f46e5;'>🔑 今日產業重點：</span>
-  <span style='font-size:13px;color:#374151;'>{sector.get('key_insight','')}</span>
-</td></tr></table>"""
+    # 熱點產業
+    hot = report.get("hot_sector", {})
+    html += _render_sector_block(hot, "#b45309", "🔥 今日市場熱點", badge)
 
+    # Footer
     html += f"""
 <table width='100%' cellpadding='0' cellspacing='0' style='border-top:1px solid #e5e7eb;margin-top:32px;padding-top:20px;'>
 <tr><td style='text-align:center;font-size:12px;color:#9ca3af;line-height:2;'>
@@ -629,26 +687,33 @@ def main():
     print(f"🚀 Daily report starting at {now_tw.strftime('%Y-%m-%d %H:%M')} Taipei time")
 
     yesterday_question = load_yesterday_question()
-    print(f"📖 昨日問題：{yesterday_question[:60]}...")
 
-    print("  [1/5] Fetching market data...")
+    print("  [1/6] Fetching market data...")
     market_data = fetch_market_data()
 
-    print("  [2/5] Fetching holdings data...")
+    print("  [2/6] Fetching holdings data...")
     holdings_data = fetch_holdings_data()
 
-    print("  [3/5] Selecting sector & concept...")
-    sector_raw = select_today_sector()
-    concept    = select_today_concept()
-    print(f"        Sector: {sector_raw['name']}, Concept: {concept[0]}")
+    print("  [3/6] Fetching news...")
+    news = fetch_news()
 
-    print("  [4/5] Fetching sector & news...")
-    sector_data = fetch_sector_data(sector_raw)
-    news        = fetch_news()
+    print("  [4/6] Selecting rotation sector & concept...")
+    rotation_sector_raw = select_today_rotation_sector()
+    concept = select_today_concept()
+    rotation_sector_data = {
+        **rotation_sector_raw,
+        "stocks": fetch_sector_stocks(rotation_sector_raw["tickers"])
+    }
+    print(f"        Rotation: {rotation_sector_raw['name']}, Concept: {concept[0]}")
 
-    print("  [5/5] Generating AI analysis...")
+    print("  [5/6] Detecting hot sector from news...")
+    hot_sector_data = detect_hot_sector(news)
+    print(f"        Hot sector: {hot_sector_data['name']}")
+
+    print("  [6/6] Generating AI analysis...")
     report = generate_report(
-        market_data, holdings_data, sector_data, news, concept, yesterday_question
+        market_data, holdings_data, rotation_sector_data,
+        hot_sector_data, news, concept, yesterday_question
     )
 
     todays_q = report.get("todays_question", {}).get("question", "")
