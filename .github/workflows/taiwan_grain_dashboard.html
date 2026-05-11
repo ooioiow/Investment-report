@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台灣雜糧農業生產儀表板 2019–2023</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f4f0;
+    --bg-tertiary: #eeece6;
+    --text-primary: #1a1a18;
+    --text-secondary: #5f5e5a;
+    --text-tertiary: #888780;
+    --border-light: rgba(0,0,0,0.1);
+    --border-mid: rgba(0,0,0,0.18);
+    --color-green: #1D9E75;
+    --color-green-bg: #E1F5EE;
+    --color-green-dark: #085041;
+    --color-amber: #EF9F27;
+    --color-amber-bg: #FAEEDA;
+    --color-amber-dark: #633806;
+    --color-red: #D85A30;
+    --color-red-bg: #FAECE7;
+    --color-red-dark: #4A1B0C;
+    --color-blue: #378ADD;
+    --color-blue-bg: #E6F1FB;
+    --color-blue-dark: #042C53;
+    --color-purple: #7F77DD;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg-primary: #1e1e1c;
+      --bg-secondary: #2a2a27;
+      --bg-tertiary: #111110;
+      --text-primary: #f0ede6;
+      --text-secondary: #b4b2a9;
+      --text-tertiary: #888780;
+      --border-light: rgba(255,255,255,0.08);
+      --border-mid: rgba(255,255,255,0.15);
+      --color-green-bg: #04342C;
+      --color-green-dark: #9FE1CB;
+      --color-amber-bg: #412402;
+      --color-amber-dark: #FAC775;
+      --color-red-bg: #4A1B0C;
+      --color-red-dark: #F5C4B3;
+      --color-blue-bg: #042C53;
+      --color-blue-dark: #B5D4F4;
+    }
+  }
+
+  body {
+    font-family: -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    line-height: 1.6;
+    font-size: 15px;
+  }
+
+  /* ── HEADER ── */
+  .site-header {
+    background: var(--bg-primary);
+    border-bottom: 0.5px solid var(--border-light);
+    padding: 20px 0 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .header-inner {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+  .header-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .site-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.3px;
+  }
+  .site-subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+  .header-sources {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    text-align: right;
+    line-height: 1.8;
+  }
+  .header-sources a {
+    color: var(--color-blue);
+    text-decoration: none;
+  }
+  .header-sources a:hover { text-decoration: underline; }
+
+  /* ── TABS ── */
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: none;
+  }
+  .tab-btn {
+    padding: 10px 22px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-bottom: 2.5px solid transparent;
+    transition: all 0.15s;
+    min-height: 44px;
+    letter-spacing: 0;
+  }
+  .tab-btn.active {
+    color: var(--text-primary);
+    border-bottom-color: var(--text-primary);
+  }
+  .tab-btn:hover:not(.active) {
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+  }
+
+  /* ── MAIN CONTENT ── */
+  .main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 24px 24px 64px;
+  }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ── BREADCRUMB ── */
+  .breadcrumb {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 8px 14px;
+    margin-bottom: 20px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    min-height: 36px;
+    border: 0.5px solid var(--border-light);
+  }
+  .crumb { color: var(--text-secondary); }
+  .crumb.active { color: var(--text-primary); font-weight: 500; }
+  .crumb-sep { color: var(--text-tertiary); }
+
+  /* ── YEAR SELECTOR ── */
+  .year-selector {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+    align-items: center;
+  }
+  .year-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-right: 4px;
+    font-weight: 500;
+  }
+  .year-btn {
+    min-height: 44px;
+    padding: 8px 18px;
+    font-size: 13px;
+    border: 0.5px solid var(--border-mid);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    transition: all 0.15s;
+    font-weight: 500;
+  }
+  .year-btn.active {
+    background: var(--text-primary);
+    color: var(--bg-primary);
+    border-color: var(--text-primary);
+  }
+  .year-btn:hover:not(.active) {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+
+  /* ── CATEGORY BADGES ── */
+  .cat-header {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .cat-badge {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border: 0.5px solid var(--border-light);
+    min-height: 44px;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .cat-badge.active-bean {
+    background: var(--color-green-bg);
+    color: var(--color-green-dark);
+    border-color: var(--color-green);
+  }
+  .cat-badge.active-grain {
+    background: var(--color-amber-bg);
+    color: var(--color-amber-dark);
+    border-color: var(--color-amber);
+  }
+  .cat-icon { font-size: 15px; }
+
+  /* ── METRICS GRID ── */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .metric-card {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 16px 18px;
+    border: 0.5px solid var(--border-light);
+  }
+  .metric-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+  .metric-val {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.5px;
+  }
+  .metric-val.warn { color: #B85400; }
+  .metric-val.alert-red { color: var(--color-red); }
+  .metric-sub {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-top: 3px;
+  }
+
+  /* ── SECTION TITLES ── */
+  .section-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    text-transform: none;
+  }
+
+  /* ── CHART WRAP ── */
+  .chart-wrap { margin-bottom: 28px; }
+  .chart-card {
+    background: var(--bg-primary);
+    border-radius: var(--radius-lg);
+    border: 0.5px solid var(--border-light);
+    padding: 20px;
+  }
+  .chart-container { position: relative; width: 100%; }
+
+  /* ── ALERT BANNER ── */
+  .alert-banner {
+    background: var(--color-red-bg);
+    border: 0.5px solid var(--color-red);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .alert-num {
+    font-size: 42px;
+    font-weight: 700;
+    color: #993C1D;
+    line-height: 1;
+    letter-spacing: -1px;
+  }
+  .alert-info { flex: 1; }
+  .alert-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-red-dark);
+    margin-bottom: 3px;
+  }
+  .alert-desc { font-size: 12px; color: #712B13; }
+  .alert-items { font-size: 12px; color: #993C1D; margin-top: 5px; font-weight: 500; }
+
+  /* ── HARVEST BARS ── */
+  .harvest-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 9px;
+  }
+  .hbr-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    width: 96px;
+    flex-shrink: 0;
+    text-align: right;
+  }
+  .hbr-bar-bg {
+    flex: 1;
+    height: 16px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .hbr-bar { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+  .hbr-val {
+    font-size: 12px;
+    width: 50px;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    text-align: right;
+  }
+  .hbr-val.low { color: #993C1D; font-weight: 600; }
+
+  /* ── ZSCORE LEGEND & FILTER ── */
+  .zscore-legend {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .zlegend-item { display: flex; align-items: center; gap: 5px; }
+  .zlegend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  .filter-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .filter-label { font-size: 13px; color: var(--text-secondary); }
+  .filter-btn {
+    min-height: 44px;
+    padding: 6px 16px;
+    font-size: 12px;
+    border: 0.5px solid var(--border-mid);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    transition: all 0.15s;
+    font-weight: 500;
+  }
+  .filter-btn.active {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-color: var(--border-mid);
+  }
+  .filter-btn:hover:not(.active) { background: var(--bg-secondary); }
+
+  /* ── DIVIDER ── */
+  .divider {
+    border: none;
+    border-top: 0.5px solid var(--border-light);
+    margin: 28px 0;
+  }
+
+  /* ── INFO ROW ── */
+  .info-row {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    margin-top: 8px;
+  }
+  .info-row a { color: var(--color-blue); text-decoration: none; }
+  .info-row a:hover { text-decoration: underline; }
+
+  /* ── FOOTER ── */
+  .site-footer {
+    background: var(--bg-primary);
+    border-top: 0.5px solid var(--border-light);
+    padding: 24px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    line-height: 2;
+  }
+  .site-footer a { color: var(--color-blue); text-decoration: none; }
+  .site-footer a:hover { text-decoration: underline; }
+
+  /* ── TREND LEGEND ── */
+  .trend-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 8px;
+  }
+  .trend-legend span { display: flex; align-items: center; gap: 5px; }
+  .tl-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+  @media (max-width: 600px) {
+    .header-top { flex-direction: column; }
+    .header-sources { text-align: left; }
+    .site-title { font-size: 17px; }
+    .main { padding: 16px 14px 48px; }
+    .metrics-grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="header-top">
+      <div>
+        <div class="site-title">台灣雜糧農業生產儀表板</div>
+        <div class="site-subtitle">涵蓋豆類與糧食作物 ｜ 2019–2023</div>
+      </div>
+      <div class="header-sources">
+        資料集來源：<a href="https://data.gov.tw/dataset/95046" target="_blank">政府開放資料平台（COA）↗</a><br>
+        參考資料：<a href="https://apis.afa.gov.tw/pagepub/AppContentPage.aspx?itemNo=PRI105" target="_blank">農糧署雜糧類年平均價格 ↗</a>
+      </div>
+    </div>
+    <nav class="tab-bar" role="tablist">
+      <button class="tab-btn active" role="tab" aria-selected="true" onclick="switchTab('public',this)">民眾（中盤商）</button>
+      <button class="tab-btn" role="tab" aria-selected="false" onclick="switchTab('gov',this)">政府（研究單位）</button>
+    </nav>
+  </div>
+</header>
+
+<main class="main">
+
+  <!-- ═══ PUBLIC TAB ═══ -->
+  <section id="tab-public" class="tab-content active" role="tabpanel">
+    <div id="breadcrumb-pub" class="breadcrumb" aria-label="目前位置">
+      <span class="crumb active">首頁</span>
+    </div>
+
+    <div class="year-selector" aria-label="年度選擇">
+      <span class="year-label">選擇年度：</span>
+      <button class="year-btn active" onclick="setYear(2019,'pub',this)">2019</button>
+      <button class="year-btn" onclick="setYear(2020,'pub',this)">2020</button>
+      <button class="year-btn" onclick="setYear(2021,'pub',this)">2021</button>
+      <button class="year-btn" onclick="setYear(2022,'pub',this)">2022</button>
+      <button class="year-btn" onclick="setYear(2023,'pub',this)">2023</button>
+    </div>
+
+    <div class="cat-header" aria-label="類別篩選">
+      <div class="cat-badge active-bean" id="cat-bean" onclick="toggleCat('bean')" role="button" tabindex="0" aria-pressed="true">
+        <span class="cat-icon">🫘</span> 豆類
+      </div>
+      <div class="cat-badge active-grain" id="cat-grain" onclick="toggleCat('grain')" role="button" tabindex="0" aria-pressed="true">
+        <span class="cat-icon">🌾</span> 糧食
+      </div>
+    </div>
+
+    <div class="metrics-grid" id="pub-metrics"></div>
+
+    <div class="chart-wrap">
+      <div class="section-title">各地區每公頃平均產量（公斤）</div>
+      <div class="chart-card">
+        <div class="chart-container" style="height:300px">
+          <canvas id="pubRegionChart" role="img" aria-label="各地區每公頃平均產量長條圖"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-wrap">
+      <div class="section-title">主要作物平均產量趨勢（2019–2023）</div>
+      <div class="chart-card">
+        <div class="chart-container" style="height:250px">
+          <canvas id="pubTrendChart" role="img" aria-label="各作物產量趨勢折線圖"></canvas>
+        </div>
+        <div class="trend-legend" id="trendLegend"></div>
+      </div>
+    </div>
+
+    <div class="info-row">
+      📊 價格資料請參閱：<a href="https://apis.afa.gov.tw/pagepub/AppContentPage.aspx?itemNo=PRI105" target="_blank">農糧署雜糧類年平均價格 ↗</a>
+    </div>
+  </section>
+
+  <!-- ═══ GOV TAB ═══ -->
+  <section id="tab-gov" class="tab-content" role="tabpanel">
+    <div id="breadcrumb-gov" class="breadcrumb" aria-label="目前位置">
+      <span class="crumb active">首頁</span>
+    </div>
+
+    <div class="year-selector" aria-label="年度選擇">
+      <span class="year-label">選擇年度：</span>
+      <button class="year-btn active" onclick="setYear(2019,'gov',this)">2019</button>
+      <button class="year-btn" onclick="setYear(2020,'gov',this)">2020</button>
+      <button class="year-btn" onclick="setYear(2021,'gov',this)">2021</button>
+      <button class="year-btn" onclick="setYear(2022,'gov',this)">2022</button>
+      <button class="year-btn" onclick="setYear(2023,'gov',this)">2023</button>
+    </div>
+
+    <div id="gov-alerts"></div>
+
+    <div class="metrics-grid" id="gov-metrics"></div>
+
+    <div class="chart-wrap">
+      <div class="section-title">收成比率（各作物，依年度排序）</div>
+      <div class="chart-card">
+        <div id="harvest-bars"></div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="chart-wrap">
+      <div class="section-title">單位產量標準化分布（Z-score 統計預警，2019–2023）</div>
+      <div class="zscore-legend">
+        <span class="zlegend-item"><span class="zlegend-dot" style="background:#378ADD"></span>正常範圍（|Z|≤1）</span>
+        <span class="zlegend-item"><span class="zlegend-dot" style="background:#EF9F27"></span>偏高（1＜|Z|≤2）</span>
+        <span class="zlegend-item"><span class="zlegend-dot" style="background:#D85A30"></span>預警（|Z|＞2σ）</span>
+      </div>
+      <div class="filter-row">
+        <span class="filter-label">顯示類別：</span>
+        <button class="filter-btn active" onclick="setZFilter('all',this)">全部</button>
+        <button class="filter-btn" onclick="setZFilter('豆類',this)">🫘 豆類</button>
+        <button class="filter-btn" onclick="setZFilter('糧食',this)">🌾 糧食</button>
+      </div>
+      <div class="chart-card">
+        <div class="chart-container" style="height:340px">
+          <canvas id="govZChart" role="img" aria-label="各作物產量Z-score泡泡分布圖"></canvas>
+        </div>
+        <div class="info-row" style="margin-top:10px">
+          🔴 紅色標記為偏離標準兩個標準差以上之預警項目，建議優先調查原因。
+        </div>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="chart-wrap">
+      <div class="section-title">各年度總種植面積趨勢（公頃）</div>
+      <div class="chart-card">
+        <div class="chart-container" style="height:220px">
+          <canvas id="govAreaChart" role="img" aria-label="歷年種植面積趨勢堆疊圖"></canvas>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div>台灣雜糧農業生產儀表板 | 資料期間：2019–2023</div>
+  <div>
+    資料來源：<a href="https://data.gov.tw/dataset/95046" target="_blank">政府開放資料平台（COA）</a> ｜
+    <a href="https://apis.afa.gov.tw/pagepub/AppContentPage.aspx?itemNo=PRI105" target="_blank">農糧署雜糧類年平均價格</a>
+  </div>
+</footer>
+
+<script>
+const RAW = [
+  {year:2019,type:"其他糧食作物",cat:"糧食",plant_area:638,reward_area:635,yield_avg:1157.5,harvest_ratio:0.995,z:-0.182},
+  {year:2019,type:"其他豆類",cat:"豆類",plant_area:411,reward_area:411,yield_avg:1157.8,harvest_ratio:1.0,z:-1.066},
+  {year:2019,type:"大豆",cat:"豆類",plant_area:3406,reward_area:3520,yield_avg:950.1,harvest_ratio:1.033,z:-0.736},
+  {year:2019,type:"小麥",cat:"糧食",plant_area:2653,reward_area:2625,yield_avg:977.6,harvest_ratio:0.989,z:-1.068},
+  {year:2019,type:"甘藷",cat:"糧食",plant_area:8410,reward_area:8395,yield_avg:17985.1,harvest_ratio:0.998,z:1.282},
+  {year:2019,type:"粟",cat:"糧食",plant_area:189,reward_area:189,yield_avg:346.1,harvest_ratio:1.0,z:-0.825},
+  {year:2019,type:"紅豆",cat:"豆類",plant_area:6400,reward_area:6396,yield_avg:627.0,harvest_ratio:0.999,z:-1.161},
+  {year:2019,type:"綠豆",cat:"豆類",plant_area:89,reward_area:89,yield_avg:335.6,harvest_ratio:1.0,z:-0.650},
+  {year:2019,type:"花豆",cat:"豆類",plant_area:3,reward_area:3,yield_avg:418.1,harvest_ratio:1.0,z:-0.907},
+  {year:2019,type:"落花生",cat:"豆類",plant_area:37823,reward_area:37833,yield_avg:2016.5,harvest_ratio:1.0,z:0.258},
+  {year:2019,type:"蜀黍",cat:"糧食",plant_area:1794,reward_area:1794,yield_avg:1055.2,harvest_ratio:1.0,z:-0.806},
+  {year:2019,type:"食用玉蜀黍",cat:"糧食",plant_area:20614,reward_area:20606,yield_avg:5946.3,harvest_ratio:1.0,z:-0.838},
+  {year:2019,type:"飼料用玉蜀黍",cat:"糧食",plant_area:15224,reward_area:15228,yield_avg:2880.3,harvest_ratio:1.0,z:-0.968},
+  {year:2020,type:"其他糧食作物",cat:"糧食",plant_area:878,reward_area:877,yield_avg:1183.2,harvest_ratio:0.999,z:-0.013},
+  {year:2020,type:"其他豆類",cat:"豆類",plant_area:363,reward_area:362,yield_avg:1176.7,harvest_ratio:0.997,z:-0.968},
+  {year:2020,type:"大豆",cat:"豆類",plant_area:3431,reward_area:3428,yield_avg:958.5,harvest_ratio:0.999,z:-0.699},
+  {year:2020,type:"小麥",cat:"糧食",plant_area:2199,reward_area:2199,yield_avg:964.0,harvest_ratio:1.0,z:-1.099},
+  {year:2020,type:"甘藷",cat:"糧食",plant_area:9777,reward_area:9753,yield_avg:16971.3,harvest_ratio:0.998,z:-1.693},
+  {year:2020,type:"粟",cat:"糧食",plant_area:146,reward_area:146,yield_avg:367.9,harvest_ratio:1.0,z:-0.794},
+  {year:2020,type:"紅豆",cat:"豆類",plant_area:7868,reward_area:7868,yield_avg:868.0,harvest_ratio:1.0,z:-0.531},
+  {year:2020,type:"綠豆",cat:"豆類",plant_area:49,reward_area:49,yield_avg:271.8,harvest_ratio:1.0,z:-0.858},
+  {year:2020,type:"花豆",cat:"豆類",plant_area:5,reward_area:5,yield_avg:561.7,harvest_ratio:1.0,z:-0.715},
+  {year:2020,type:"落花生",cat:"豆類",plant_area:19665,reward_area:19665,yield_avg:1953.2,harvest_ratio:1.0,z:-0.641},
+  {year:2020,type:"蜀黍",cat:"糧食",plant_area:1780,reward_area:1780,yield_avg:1053.9,harvest_ratio:1.0,z:-0.811},
+  {year:2020,type:"食用玉蜀黍",cat:"糧食",plant_area:15807,reward_area:15800,yield_avg:5961.3,harvest_ratio:1.0,z:-0.722},
+  {year:2020,type:"飼料用玉蜀黍",cat:"糧食",plant_area:16211,reward_area:16198,yield_avg:2445.8,harvest_ratio:0.999,z:-1.444},
+  {year:2021,type:"其他糧食作物",cat:"糧食",plant_area:771,reward_area:771,yield_avg:919.1,harvest_ratio:1.0,z:-1.752},
+  {year:2021,type:"其他豆類",cat:"豆類",plant_area:318,reward_area:318,yield_avg:1298.5,harvest_ratio:1.0,z:-0.336},
+  {year:2021,type:"大豆",cat:"豆類",plant_area:3377,reward_area:3375,yield_avg:891.2,harvest_ratio:0.999,z:-1.000},
+  {year:2021,type:"小麥",cat:"糧食",plant_area:2242,reward_area:2242,yield_avg:1936.8,harvest_ratio:1.0,z:1.186},
+  {year:2021,type:"甘藷",cat:"糧食",plant_area:8783,reward_area:8767,yield_avg:17757.4,harvest_ratio:0.998,z:0.614},
+  {year:2021,type:"粟",cat:"糧食",plant_area:124,reward_area:124,yield_avg:354.5,harvest_ratio:1.0,z:-0.813},
+  {year:2021,type:"紅豆",cat:"豆類",plant_area:6271,reward_area:6271,yield_avg:801.2,harvest_ratio:1.0,z:-0.705},
+  {year:2021,type:"綠豆",cat:"豆類",plant_area:51,reward_area:51,yield_avg:253.6,harvest_ratio:1.0,z:-0.918},
+  {year:2021,type:"花豆",cat:"豆類",plant_area:4,reward_area:4,yield_avg:490.1,harvest_ratio:1.0,z:-0.811},
+  {year:2021,type:"落花生",cat:"豆類",plant_area:17959,reward_area:18079,yield_avg:1893.8,harvest_ratio:1.007,z:-1.485},
+  {year:2021,type:"蜀黍",cat:"糧食",plant_area:1910,reward_area:1910,yield_avg:1072.0,harvest_ratio:1.0,z:-0.741},
+  {year:2021,type:"食用玉蜀黍",cat:"糧食",plant_area:15448,reward_area:15442,yield_avg:5946.0,harvest_ratio:1.0,z:-0.840},
+  {year:2021,type:"飼料用玉蜀黍",cat:"糧食",plant_area:16319,reward_area:16315,yield_avg:4627.5,harvest_ratio:1.0,z:0.947},
+  {year:2022,type:"其他糧食作物",cat:"糧食",plant_area:944,reward_area:837,yield_avg:1331.0,harvest_ratio:0.887,z:0.961},
+  {year:2022,type:"其他豆類",cat:"豆類",plant_area:379,reward_area:379,yield_avg:1587.1,harvest_ratio:1.0,z:1.161},
+  {year:2022,type:"大豆",cat:"豆類",plant_area:4103,reward_area:3956,yield_avg:1398.4,harvest_ratio:0.964,z:1.271},
+  {year:2022,type:"小麥",cat:"糧食",plant_area:2067,reward_area:2067,yield_avg:1904.0,harvest_ratio:1.0,z:1.109},
+  {year:2022,type:"甘藷",cat:"糧食",plant_area:9155,reward_area:9122,yield_avg:17587.9,harvest_ratio:0.996,z:0.116},
+  {year:2022,type:"粟",cat:"糧食",plant_area:90,reward_area:90,yield_avg:1888.8,harvest_ratio:1.0,z:1.402},
+  {year:2022,type:"紅豆",cat:"豆類",plant_area:5117,reward_area:5117,yield_avg:1527.6,harvest_ratio:1.0,z:1.193},
+  {year:2022,type:"綠豆",cat:"豆類",plant_area:46,reward_area:46,yield_avg:956.0,harvest_ratio:1.0,z:1.381},
+  {year:2022,type:"花豆",cat:"豆類",plant_area:3,reward_area:3,yield_avg:2124.2,harvest_ratio:1.0,z:1.375},
+  {year:2022,type:"落花生",cat:"豆類",plant_area:18520,reward_area:18520,yield_avg:2101.8,harvest_ratio:1.0,z:1.469},
+  {year:2022,type:"蜀黍",cat:"糧食",plant_area:2819,reward_area:2346,yield_avg:1687.9,harvest_ratio:0.832,z:1.606},
+  {year:2022,type:"食用玉蜀黍",cat:"糧食",plant_area:15068,reward_area:15052,yield_avg:6252.2,harvest_ratio:0.999,z:1.509},
+  {year:2022,type:"飼料用玉蜀黍",cat:"糧食",plant_area:20147,reward_area:20102,yield_avg:4484.3,harvest_ratio:0.998,z:0.790},
+  {year:2023,type:"其他糧食作物",cat:"糧食",plant_area:1248,reward_area:1252,yield_avg:1334.9,harvest_ratio:1.003,z:0.986},
+  {year:2023,type:"其他豆類",cat:"豆類",plant_area:353,reward_area:353,yield_avg:1596.7,harvest_ratio:1.0,z:1.210},
+  {year:2023,type:"大豆",cat:"豆類",plant_area:4441,reward_area:4441,yield_avg:1374.4,harvest_ratio:1.0,z:1.164},
+  {year:2023,type:"小麥",cat:"糧食",plant_area:2049,reward_area:2049,yield_avg:1377.9,harvest_ratio:1.0,z:-0.127},
+  {year:2023,type:"甘藷",cat:"糧食",plant_area:8532,reward_area:8512,yield_avg:17439.8,harvest_ratio:0.998,z:-0.318},
+  {year:2023,type:"粟",cat:"糧食",plant_area:135,reward_area:135,yield_avg:1630.8,harvest_ratio:1.0,z:1.030},
+  {year:2023,type:"紅豆",cat:"豆類",plant_area:5745,reward_area:5745,yield_avg:1532.1,harvest_ratio:1.0,z:1.205},
+  {year:2023,type:"綠豆",cat:"豆類",plant_area:20,reward_area:20,yield_avg:853.0,harvest_ratio:1.0,z:1.044},
+  {year:2023,type:"花豆",cat:"豆類",plant_area:2,reward_area:2,yield_avg:1887.6,harvest_ratio:1.0,z:1.058},
+  {year:2023,type:"落花生",cat:"豆類",plant_area:17156,reward_area:17156,yield_avg:2026.4,harvest_ratio:1.0,z:0.399},
+  {year:2023,type:"蜀黍",cat:"糧食",plant_area:3309,reward_area:2605,yield_avg:1463.6,harvest_ratio:0.787,z:0.751},
+  {year:2023,type:"食用玉蜀黍",cat:"糧食",plant_area:14474,reward_area:14391,yield_avg:6171.6,harvest_ratio:0.994,z:0.891},
+  {year:2023,type:"飼料用玉蜀黍",cat:"糧食",plant_area:22636,reward_area:22634,yield_avg:4378.9,harvest_ratio:1.0,z:0.675}
+];
+
+const CITY_DATA = [
+  {year:2019,city:"雲林縣",cat:"糧食",yield_avg:6320},{year:2019,city:"嘉義縣",cat:"糧食",yield_avg:5840},
+  {year:2019,city:"台南市",cat:"糧食",yield_avg:6680},{year:2019,city:"屏東縣",cat:"糧食",yield_avg:4900},
+  {year:2019,city:"彰化縣",cat:"糧食",yield_avg:5200},{year:2019,city:"台中市",cat:"糧食",yield_avg:4513},
+  {year:2019,city:"南投縣",cat:"糧食",yield_avg:4806},{year:2019,city:"花蓮縣",cat:"糧食",yield_avg:3800},
+  {year:2019,city:"台東縣",cat:"糧食",yield_avg:3668},{year:2019,city:"苗栗縣",cat:"糧食",yield_avg:3200},
+  {year:2019,city:"雲林縣",cat:"豆類",yield_avg:1850},{year:2019,city:"嘉義縣",cat:"豆類",yield_avg:1620},
+  {year:2019,city:"台南市",cat:"豆類",yield_avg:1712},{year:2019,city:"屏東縣",cat:"豆類",yield_avg:1580},
+  {year:2019,city:"彰化縣",cat:"豆類",yield_avg:1420},{year:2019,city:"台中市",cat:"豆類",yield_avg:1381},
+  {year:2020,city:"雲林縣",cat:"糧食",yield_avg:6100},{year:2020,city:"嘉義縣",cat:"糧食",yield_avg:5650},
+  {year:2020,city:"台南市",cat:"糧食",yield_avg:6400},{year:2020,city:"屏東縣",cat:"糧食",yield_avg:4750},
+  {year:2020,city:"彰化縣",cat:"糧食",yield_avg:4980},{year:2020,city:"台中市",cat:"糧食",yield_avg:4300},
+  {year:2020,city:"南投縣",cat:"糧食",yield_avg:4600},{year:2020,city:"花蓮縣",cat:"糧食",yield_avg:3600},
+  {year:2020,city:"台東縣",cat:"糧食",yield_avg:3500},{year:2020,city:"苗栗縣",cat:"糧食",yield_avg:3100},
+  {year:2020,city:"雲林縣",cat:"豆類",yield_avg:1720},{year:2020,city:"嘉義縣",cat:"豆類",yield_avg:1480},
+  {year:2020,city:"台南市",cat:"豆類",yield_avg:1590},{year:2020,city:"屏東縣",cat:"豆類",yield_avg:1450},
+  {year:2021,city:"雲林縣",cat:"糧食",yield_avg:6050},{year:2021,city:"嘉義縣",cat:"糧食",yield_avg:5720},
+  {year:2021,city:"台南市",cat:"糧食",yield_avg:6580},{year:2021,city:"屏東縣",cat:"糧食",yield_avg:4820},
+  {year:2021,city:"彰化縣",cat:"糧食",yield_avg:5050},{year:2021,city:"台中市",cat:"糧食",yield_avg:4450},
+  {year:2021,city:"南投縣",cat:"糧食",yield_avg:4700},{year:2021,city:"花蓮縣",cat:"糧食",yield_avg:3750},
+  {year:2021,city:"台東縣",cat:"糧食",yield_avg:3550},{year:2021,city:"苗栗縣",cat:"糧食",yield_avg:3050},
+  {year:2021,city:"雲林縣",cat:"豆類",yield_avg:1780},{year:2021,city:"嘉義縣",cat:"豆類",yield_avg:1550},
+  {year:2021,city:"台南市",cat:"豆類",yield_avg:1650},{year:2021,city:"屏東縣",cat:"豆類",yield_avg:1510},
+  {year:2022,city:"雲林縣",cat:"糧食",yield_avg:6380},{year:2022,city:"嘉義縣",cat:"糧食",yield_avg:5900},
+  {year:2022,city:"台南市",cat:"糧食",yield_avg:6850},{year:2022,city:"屏東縣",cat:"糧食",yield_avg:5100},
+  {year:2022,city:"彰化縣",cat:"糧食",yield_avg:5350},{year:2022,city:"台中市",cat:"糧食",yield_avg:4750},
+  {year:2022,city:"南投縣",cat:"糧食",yield_avg:5050},{year:2022,city:"花蓮縣",cat:"糧食",yield_avg:4050},
+  {year:2022,city:"台東縣",cat:"糧食",yield_avg:3820},{year:2022,city:"苗栗縣",cat:"糧食",yield_avg:3350},
+  {year:2022,city:"雲林縣",cat:"豆類",yield_avg:2050},{year:2022,city:"嘉義縣",cat:"豆類",yield_avg:1850},
+  {year:2022,city:"台南市",cat:"豆類",yield_avg:1950},{year:2022,city:"屏東縣",cat:"豆類",yield_avg:1720},
+  {year:2023,city:"雲林縣",cat:"糧食",yield_avg:6200},{year:2023,city:"嘉義縣",cat:"糧食",yield_avg:5780},
+  {year:2023,city:"台南市",cat:"糧食",yield_avg:6720},{year:2023,city:"屏東縣",cat:"糧食",yield_avg:4980},
+  {year:2023,city:"彰化縣",cat:"糧食",yield_avg:5180},{year:2023,city:"台中市",cat:"糧食",yield_avg:4620},
+  {year:2023,city:"南投縣",cat:"糧食",yield_avg:4890},{year:2023,city:"花蓮縣",cat:"糧食",yield_avg:3920},
+  {year:2023,city:"台東縣",cat:"糧食",yield_avg:3680},{year:2023,city:"苗栗縣",cat:"糧食",yield_avg:3200},
+  {year:2023,city:"雲林縣",cat:"豆類",yield_avg:1980},{year:2023,city:"嘉義縣",cat:"豆類",yield_avg:1780},
+  {year:2023,city:"台南市",cat:"豆類",yield_avg:1880},{year:2023,city:"屏東縣",cat:"豆類",yield_avg:1650}
+];
+
+const HARVEST_THRESHOLD = 0.93;
+let pubYear = 2019, govYear = 2019;
+let catFilter = { bean: true, grain: true };
+let zFilter = 'all';
+let chartPubRegion = null, chartPubTrend = null, chartGovZ = null, chartGovArea = null;
+
+function switchTab(tab, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  btn.setAttribute('aria-selected','true');
+  document.getElementById('tab-' + tab).classList.add('active');
+  if (tab === 'gov') renderGov(govYear);
+}
+
+function setYear(y, tab, btn) {
+  const tabId = tab === 'pub' ? 'public' : 'gov';
+  document.querySelectorAll(`#tab-${tabId} .year-btn`).forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (tab === 'pub') { pubYear = y; renderPub(y); }
+  else { govYear = y; renderGov(y); }
+}
+
+function toggleCat(c) {
+  catFilter[c] = !catFilter[c];
+  const el = document.getElementById('cat-' + c);
+  if (catFilter[c]) el.classList.add(c === 'bean' ? 'active-bean' : 'active-grain');
+  else { el.classList.remove('active-bean'); el.classList.remove('active-grain'); }
+  el.setAttribute('aria-pressed', catFilter[c]);
+  renderPub(pubYear);
+}
+
+function setZFilter(f, btn) {
+  zFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderGovZ(govYear);
+}
+
+function renderPub(y) {
+  updateCrumb('pub', y, catFilter.bean && catFilter.grain ? '豆類＋糧食' : catFilter.bean ? '豆類' : '糧食');
+  renderPubMetrics(y);
+  renderPubRegionChart(y);
+  renderPubTrendChart(y);
+}
+
+function updateCrumb(tab, y, extra) {
+  const bc = document.getElementById('breadcrumb-' + tab);
+  bc.innerHTML = `<span class="crumb">首頁</span><span class="crumb-sep">›</span><span class="crumb active">${y}年</span><span class="crumb-sep">›</span><span class="crumb active">${extra}</span>`;
+}
+
+function renderPubMetrics(y) {
+  const f = RAW.filter(d => d.year === y && ((d.cat === '豆類' && catFilter.bean) || (d.cat === '糧食' && catFilter.grain)));
+  const totalPlant = f.reduce((s, d) => s + d.plant_area, 0);
+  const avgYield = f.length ? Math.round(f.reduce((s, d) => s + d.yield_avg, 0) / f.length) : 0;
+  document.getElementById('pub-metrics').innerHTML = `
+    <div class="metric-card"><div class="metric-label">作物種類</div><div class="metric-val">${f.length}</div><div class="metric-sub">種</div></div>
+    <div class="metric-card"><div class="metric-label">總種植面積</div><div class="metric-val">${totalPlant.toLocaleString()}</div><div class="metric-sub">公頃</div></div>
+    <div class="metric-card"><div class="metric-label">平均每公頃產量</div><div class="metric-val">${avgYield.toLocaleString()}</div><div class="metric-sub">公斤 / 公頃</div></div>
+  `;
+}
+
+function renderPubRegionChart(y) {
+  const f = CITY_DATA.filter(d => d.year === y && ((d.cat === '豆類' && catFilter.bean) || (d.cat === '糧食' && catFilter.grain)));
+  const cityMap = {};
+  f.forEach(d => { if (!cityMap[d.city]) cityMap[d.city] = []; cityMap[d.city].push(d.yield_avg); });
+  const cities = Object.keys(cityMap).slice(0, 10);
+  const vals = cities.map(c => Math.round(cityMap[c].reduce((s, v) => s + v, 0) / cityMap[c].length));
+  const colors = vals.map(v => v < 3500 ? '#888780' : v > 6000 ? '#1D9E75' : '#378ADD');
+  if (chartPubRegion) chartPubRegion.destroy();
+  chartPubRegion = new Chart(document.getElementById('pubRegionChart'), {
+    type: 'bar',
+    data: { labels: cities, datasets: [{ label: '每公頃平均產量（公斤）', data: vals, backgroundColor: colors, borderRadius: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${ctx.parsed.y.toLocaleString()} 公斤` } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 12 }, maxRotation: 45, autoSkip: false } },
+        y: { grid: { color: 'rgba(128,128,128,.08)' }, ticks: { callback: v => `${(v / 1000).toFixed(0)}k`, font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+function renderPubTrendChart(y) {
+  const years = [2019, 2020, 2021, 2022, 2023];
+  const types = ['落花生', '紅豆', '食用玉蜀黍', '小麥', '大豆'];
+  const colors = ['#1D9E75', '#D85A30', '#378ADD', '#EF9F27', '#7F77DD'];
+  const datasets = types.map((t, i) => ({
+    label: t,
+    data: years.map(yr => { const d = RAW.find(r => r.year === yr && r.type === t); return d ? Math.round(d.yield_avg) : null; }),
+    borderColor: colors[i], backgroundColor: colors[i] + '28', tension: 0.35, pointRadius: 4,
+    borderDash: t === '小麥' ? [5, 3] : [], fill: false
+  }));
+  if (chartPubTrend) chartPubTrend.destroy();
+  chartPubTrend = new Chart(document.getElementById('pubTrendChart'), {
+    type: 'line', data: { labels: years, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()} 公斤` } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 12 } } },
+        y: { grid: { color: 'rgba(128,128,128,.08)' }, ticks: { callback: v => `${(v / 1000).toFixed(0)}k`, font: { size: 11 } } }
+      }
+    }
+  });
+  const legend = document.getElementById('trendLegend');
+  legend.innerHTML = types.map((t, i) => `<span><span class="tl-dot" style="background:${colors[i]}"></span>${t}</span>`).join('');
+}
+
+function renderGov(y) {
+  updateCrumb('gov', y, '研究分析');
+  renderGovAlerts(y);
+  renderGovMetrics(y);
+  renderHarvestBars(y);
+  renderGovZ(y);
+  if (!chartGovArea) renderGovArea();
+}
+
+function renderGovAlerts(y) {
+  const low = RAW.filter(d => d.year === y && d.harvest_ratio < HARVEST_THRESHOLD);
+  const c = document.getElementById('gov-alerts');
+  if (!low.length) { c.innerHTML = ''; return; }
+  const items = low.map(d => `${d.type}（${(d.harvest_ratio * 100).toFixed(1)}%）`).join('、');
+  c.innerHTML = `<div class="alert-banner" role="alert">
+    <div class="alert-num">${low.length}</div>
+    <div class="alert-info">
+      <div class="alert-title">⚠ 收成比率異常警示 — ${y}年</div>
+      <div class="alert-desc">以下作物收成比率低於 ${(HARVEST_THRESHOLD * 100).toFixed(0)}%，建議調查異常原因</div>
+      <div class="alert-items">${items}</div>
+    </div>
+  </div>`;
+}
+
+function renderGovMetrics(y) {
+  const data = RAW.filter(d => d.year === y);
+  const totalPlant = data.reduce((s, d) => s + d.plant_area, 0);
+  const avgH = data.length ? data.reduce((s, d) => s + d.harvest_ratio, 0) / data.length : 0;
+  const lowCount = data.filter(d => d.harvest_ratio < HARVEST_THRESHOLD).length;
+  const alertCount = data.filter(d => Math.abs(d.z) > 2).length;
+  document.getElementById('gov-metrics').innerHTML = `
+    <div class="metric-card"><div class="metric-label">總種植面積</div><div class="metric-val">${totalPlant.toLocaleString()}</div><div class="metric-sub">公頃</div></div>
+    <div class="metric-card"><div class="metric-label">平均收成比率</div><div class="metric-val ${avgH < 0.95 ? 'warn' : ''}">${(avgH * 100).toFixed(1)}%</div><div class="metric-sub">全作物平均</div></div>
+    <div class="metric-card"><div class="metric-label">低收成作物</div><div class="metric-val ${lowCount > 0 ? 'alert-red' : ''}">${lowCount}</div><div class="metric-sub">低於 93%</div></div>
+    <div class="metric-card"><div class="metric-label">產量預警作物</div><div class="metric-val ${alertCount > 0 ? 'alert-red' : ''}">${alertCount}</div><div class="metric-sub">|Z-score| > 2σ</div></div>
+  `;
+}
+
+function renderHarvestBars(y) {
+  const data = RAW.filter(d => d.year === y).sort((a, b) => a.harvest_ratio - b.harvest_ratio);
+  document.getElementById('harvest-bars').innerHTML = data.map(d => {
+    const pct = Math.min(100, d.harvest_ratio * 100).toFixed(1);
+    const isLow = d.harvest_ratio < HARVEST_THRESHOLD;
+    const color = isLow ? '#D85A30' : d.harvest_ratio < 0.97 ? '#EF9F27' : '#1D9E75';
+    return `<div class="harvest-bar-row">
+      <span class="hbr-label">${d.type}</span>
+      <div class="hbr-bar-bg"><div class="hbr-bar" style="width:${pct}%;background:${color}"></div></div>
+      <span class="hbr-val ${isLow ? 'low' : ''}">${pct}%</span>
+    </div>`;
+  }).join('');
+}
+
+function renderGovZ(y) {
+  const data = RAW.filter(d => d.year === y && (zFilter === 'all' || d.cat === zFilter));
+  const pts = data.map(d => ({
+    x: d.yield_avg, y: d.z, r: 7, label: d.type, cat: d.cat,
+    bg: Math.abs(d.z) > 2 ? '#D85A30' : Math.abs(d.z) > 1 ? '#EF9F27' : '#378ADD'
+  }));
+  if (chartGovZ) chartGovZ.destroy();
+
+  const refLinesPlugin = {
+    id: 'refLines',
+    afterDraw(chart) {
+      const { ctx, scales } = chart;
+      [{ v: 2, c: '#D85A30' }, { v: -2, c: '#D85A30' }, { v: 1, c: '#EF9F27' }, { v: -1, c: '#EF9F27' }].forEach(({ v, c }) => {
+        const yPx = scales.y.getPixelForValue(v);
+        ctx.save(); ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = c + '55'; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(scales.x.left, yPx); ctx.lineTo(scales.x.right, yPx); ctx.stroke(); ctx.restore();
+      });
+    }
+  };
+
+  chartGovZ = new Chart(document.getElementById('govZChart'), {
+    type: 'bubble',
+    data: { datasets: [{ label: '作物', data: pts, backgroundColor: pts.map(p => p.bg + 'bb'), borderColor: pts.map(p => p.bg), borderWidth: 1.5 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      layout: { padding: { top: 24, bottom: 24, left: 12, right: 12 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => { const p = pts[ctx.dataIndex]; return [`${p.label} (${p.cat})`, `產量: ${p.x.toFixed(0)} 公斤`, `Z-score: ${p.y.toFixed(2)}`]; } } }
+      },
+      scales: {
+        x: { title: { display: true, text: '每公頃平均產量（公斤）', font: { size: 11 } }, grid: { color: 'rgba(128,128,128,.08)' }, ticks: { font: { size: 11 }, callback: v => v > 1000 ? (v / 1000).toFixed(0) + 'k' : v } },
+        y: { title: { display: true, text: 'Z-score（標準化）', font: { size: 11 } }, grid: { color: 'rgba(128,128,128,.08)' }, min: -2.5, max: 2.5, ticks: { font: { size: 11 }, stepSize: 0.5 } }
+      }
+    },
+    plugins: [refLinesPlugin]
+  });
+}
+
+function renderGovArea() {
+  const years = [2019, 2020, 2021, 2022, 2023];
+  const beansData = years.map(y => RAW.filter(d => d.year === y && d.cat === '豆類').reduce((s, d) => s + d.plant_area, 0));
+  const grainData = years.map(y => RAW.filter(d => d.year === y && d.cat === '糧食').reduce((s, d) => s + d.plant_area, 0));
+  chartGovArea = new Chart(document.getElementById('govAreaChart'), {
+    type: 'bar',
+    data: {
+      labels: years,
+      datasets: [
+        { label: '🫘 豆類', data: beansData, backgroundColor: '#1D9E7570', borderColor: '#1D9E75', borderWidth: 1, stack: 's' },
+        { label: '🌾 糧食', data: grainData, backgroundColor: '#EF9F2770', borderColor: '#EF9F27', borderWidth: 1, stack: 's' }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: true, position: 'top', labels: { font: { size: 12 }, usePointStyle: true, pointStyle: 'rect', padding: 16 } } },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { font: { size: 12 } } },
+        y: { stacked: true, grid: { color: 'rgba(128,128,128,.08)' }, ticks: { callback: v => `${(v / 1000).toFixed(0)}k`, font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+// Init
+renderPub(2019);
+</script>
+</body>
+</html>
