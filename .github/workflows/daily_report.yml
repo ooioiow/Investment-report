@@ -3,7 +3,7 @@ name: Daily Investment Report
 on:
   schedule:
     # Every day at 00:00 UTC = 08:00 Taipei time (UTC+8)
-    - cron: '0 0 * * *'
+    - cron: '30 0 * * *'
   workflow_dispatch:
 
 # 給 Actions 寫入 repo 的權限，用來自動 commit 今日問題
