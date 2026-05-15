@@ -2,8 +2,8 @@ name: Weekly Investment Report
 
 on:
   schedule:
-    # Every Sunday at 12:00 UTC = 20:00 Taipei time (UTC+8)
-    - cron: '0 12 * * 0'
+    # Every day at 23:00 UTC = 07:00 Taipei time (UTC+8)
+    - cron: '0 23 * * *'
   # Allow manual trigger from Actions tab for testing
   workflow_dispatch:
 
@@ -25,10 +25,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run weekly investment report
+      - name: Run daily investment report
         env:
           ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
           GMAIL_USER:         ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL:    ${{ secrets.RECIPIENT_EMAIL }}
+          FINMIND_TOKEN:      ${{ secrets.FINMIND_TOKEN }}
         run: python weekly_report.py

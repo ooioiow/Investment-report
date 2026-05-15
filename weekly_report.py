@@ -1,347 +1,432 @@
 #!/usr/bin/env python3
 """
-Investment Learning Weekly Report
-Runs every Sunday at 20:00 Taipei time (12:00 UTC via GitHub Actions)
+Value Investing Daily Report - Taiwan Market Industry Rotation
+Runs every day at 23:00 UTC via GitHub Actions.
+Each day rotates through 2 of 12 industries; includes fundamentals from FinMind API.
 """
 
 import os
 import json
 import html as _html_lib
 import smtplib
+import time
+from collections import defaultdict
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta, timezone
 
-import yfinance as yf
-import feedparser
+import requests
 import anthropic
 
-# ── Config from environment variables ─────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+# Config
+# ═══════════════════════════════════════════════════════════════════
 ANTHROPIC_API_KEY  = os.environ["ANTHROPIC_API_KEY"]
 GMAIL_USER         = os.environ["GMAIL_USER"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 RECIPIENT_EMAIL    = os.environ["RECIPIENT_EMAIL"]
+FINMIND_TOKEN      = os.environ.get("FINMIND_TOKEN", "")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+FINMIND_API = "https://api.finmindtrade.com/api/v4/data"
 
-# ── Market Indices ─────────────────────────────────────────────────────────────
-MARKET_INDICES = [
-    {"label": "S&P 500",  "ticker": "^GSPC"},
-    {"label": "Nasdaq",   "ticker": "^IXIC"},
-    {"label": "台股加權", "ticker": "^TWII"},
-    {"label": "USD/TWD",  "ticker": "TWD=X"},
-    {"label": "VIX",      "ticker": "^VIX"},
-]
+# ═══════════════════════════════════════════════════════════════════
+# User Holdings  (ticker_id → display_name)
+# ═══════════════════════════════════════════════════════════════════
+HOLDINGS = {
+    "3231": "緯創",
+    "0050": "元大台灣50",
+    "2618": "長榮航空",
+}
 
-# ── Sector Pool: 3 selected per week by rotation ──────────────────────────────
+# ═══════════════════════════════════════════════════════════════════
+# 12 Industry Sectors with 3-5 representative Taiwan listed companies
+# Order index 0-11 maps to the rotation schedule.
+# ═══════════════════════════════════════════════════════════════════
 ALL_SECTORS = [
-    {"name": "AI 與雲端",  "tickers": ["NVDA", "MSFT"],    "desc": "人工智慧、雲端運算、大型語言模型"},
-    {"name": "半導體",     "tickers": ["TSM",  "ASML"],    "desc": "晶圓代工、半導體設備、先進製程"},
-    {"name": "生技醫療",   "tickers": ["JNJ",  "UNH"],     "desc": "製藥研發、醫療保險、醫療器材"},
-    {"name": "清潔能源",   "tickers": ["NEE",  "ENPH"],    "desc": "再生能源、太陽能、儲能系統"},
-    {"name": "消費必需品", "tickers": ["KO",   "PG"],      "desc": "飲料、日用品、防禦型配置"},
-    {"name": "支付金融",   "tickers": ["V",    "MA"],      "desc": "支付網路、跨境交易、數位金融"},
-    {"name": "台灣供應鏈", "tickers": ["2330.TW", "2317.TW"], "desc": "台積電與鴻海，台灣科技核心"},
+    {
+        "name": "半導體",
+        "tickers": [
+            {"id": "2330", "name": "台積電"},
+            {"id": "2454", "name": "聯發科"},
+            {"id": "2303", "name": "聯電"},
+            {"id": "3711", "name": "日月光投控"},
+            {"id": "2337", "name": "旺宏"},
+        ],
+    },
+    {
+        "name": "電子製造/ODM",
+        "tickers": [
+            {"id": "2317", "name": "鴻海"},
+            {"id": "2382", "name": "廣達"},
+            {"id": "2356", "name": "英業達"},
+            {"id": "2353", "name": "宏碁"},
+            {"id": "3231", "name": "緯創"},
+        ],
+    },
+    {
+        "name": "金融/銀行",
+        "tickers": [
+            {"id": "2882", "name": "國泰金"},
+            {"id": "2881", "name": "富邦金"},
+            {"id": "2886", "name": "兆豐金"},
+            {"id": "2884", "name": "玉山金"},
+            {"id": "2891", "name": "中信金"},
+        ],
+    },
+    {
+        "name": "航空/航運",
+        "tickers": [
+            {"id": "2618", "name": "長榮航"},
+            {"id": "2610", "name": "華航"},
+            {"id": "2603", "name": "長榮"},
+            {"id": "2609", "name": "陽明"},
+            {"id": "2615", "name": "萬海"},
+        ],
+    },
+    {
+        "name": "傳產/化工",
+        "tickers": [
+            {"id": "1301", "name": "台塑"},
+            {"id": "1303", "name": "南亞"},
+            {"id": "1326", "name": "台化"},
+            {"id": "1314", "name": "中石化"},
+            {"id": "1402", "name": "遠東新"},
+        ],
+    },
+    {
+        "name": "生技/醫療",
+        "tickers": [
+            {"id": "4711", "name": "中裕"},
+            {"id": "6446", "name": "藥華藥"},
+            {"id": "1786", "name": "科妍"},
+            {"id": "4174", "name": "浩鼎"},
+            {"id": "4168", "name": "醣聯"},
+        ],
+    },
+    {
+        "name": "零售/消費",
+        "tickers": [
+            {"id": "2912", "name": "統一超"},
+            {"id": "2903", "name": "遠百"},
+            {"id": "2207", "name": "和泰車"},
+            {"id": "2915", "name": "潤泰全"},
+            {"id": "9904", "name": "寶成"},
+        ],
+    },
+    {
+        "name": "營建/房地產",
+        "tickers": [
+            {"id": "5522", "name": "遠雄"},
+            {"id": "2536", "name": "宏普"},
+            {"id": "2504", "name": "國產"},
+            {"id": "2515", "name": "中工"},
+            {"id": "2545", "name": "皇翔"},
+        ],
+    },
+    {
+        "name": "鋼鐵/原物料",
+        "tickers": [
+            {"id": "2002", "name": "中鋼"},
+            {"id": "2006", "name": "東和鋼鐵"},
+            {"id": "2008", "name": "高興昌"},
+            {"id": "1101", "name": "台灣水泥"},
+            {"id": "1102", "name": "亞泥"},
+        ],
+    },
+    {
+        "name": "電信",
+        "tickers": [
+            {"id": "2412", "name": "中華電"},
+            {"id": "4904", "name": "遠傳"},
+            {"id": "3045", "name": "台灣大"},
+            {"id": "4977", "name": "亞太電"},
+        ],
+    },
+    {
+        "name": "ETF/大盤",
+        "tickers": [
+            {"id": "0050", "name": "元大台灣50"},
+            {"id": "0056", "name": "元大高股息"},
+            {"id": "006208", "name": "富邦台50"},
+            {"id": "00878", "name": "國泰永續高股息"},
+            {"id": "00881", "name": "國泰台灣5G+"},
+        ],
+    },
+    {
+        "name": "科技軟體/雲端",
+        "tickers": [
+            {"id": "5274", "name": "信驊"},
+            {"id": "6669", "name": "緯穎"},
+            {"id": "3443", "name": "創意電子"},
+            {"id": "8299", "name": "群聯電子"},
+            {"id": "6770", "name": "力積電"},
+        ],
+    },
 ]
 
-# ── Investment Concepts: rotates weekly ───────────────────────────────────────
-INVESTMENT_CONCEPTS = [
-    "自由現金流（Free Cash Flow, FCF）",
-    "護城河（Economic Moat）",
-    "股東權益報酬率（Return on Equity, ROE）",
-    "本益比與本益成長比（P/E & PEG Ratio）",
-    "企業價值倍數（EV/EBITDA）",
-    "股息成長投資策略（Dividend Growth Investing）",
-    "毛利率與淨利率的意義（Gross & Net Margin）",
-    "資本支出與輕資產商業模式（CapEx & Asset-Light）",
-    "投入資本回報率（Return on Invested Capital, ROIC）",
-    "安全邊際（Margin of Safety）",
-    "複利效應與長期投資的力量",
-    "資產負債表解讀：財務健康度評估",
-    "現金流量表三大部分：判斷真實獲利能力",
-    "競爭優勢分析：Porter's Five Forces",
-    "分散投資、相關性與組合波動率",
-    "景氣循環股 vs 防禦型股票的選擇時機",
-    "成長型投資 vs 價值型投資",
-    "巴菲特指標（Buffett Indicator）與市場估值",
-    "殖利率曲線倒掛與衰退預測",
-    "股票回購（Buyback）對股東價值的影響",
-]
 
-# ── RSS News Feeds ─────────────────────────────────────────────────────────────
-RSS_FEEDS = [
-    "https://finance.yahoo.com/news/rssindex",
-    "https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC&region=US&lang=en-US",
-]
+# ═══════════════════════════════════════════════════════════════════
+# FinMind API Helpers
+# ═══════════════════════════════════════════════════════════════════
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Data Fetching
-# ══════════════════════════════════════════════════════════════════════════════
-
-def fetch_market_data() -> list:
-    """Fetch weekly performance for all five market indices."""
-    results = []
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(days=12)  # buffer for holidays/weekends
-
-    for item in MARKET_INDICES:
-        try:
-            hist = yf.Ticker(item["ticker"]).history(
-                start=start.strftime("%Y-%m-%d"),
-                end=end.strftime("%Y-%m-%d"),
-            )
-            if hist.empty or len(hist) < 2:
-                results.append({"label": item["label"], "ticker": item["ticker"], "error": "資料不足"})
-                continue
-
-            current = float(hist["Close"].iloc[-1])
-            # Compare to close from ~5 trading days ago
-            lookback = min(6, len(hist) - 1)
-            prev = float(hist["Close"].iloc[-lookback - 1])
-            change_pct = (current - prev) / prev * 100
-
-            results.append({
-                "label": item["label"],
-                "ticker": item["ticker"],
-                "current": round(current, 2),
-                "prev": round(prev, 2),
-                "change_pct": round(change_pct, 2),
-            })
-        except Exception as e:
-            results.append({"label": item["label"], "ticker": item["ticker"], "error": str(e)})
-
-    return results
+def _finmind_get(dataset: str, data_id: str, start_date: str) -> list:
+    """Call FinMind v4 API; return data list or [] on any error."""
+    if not FINMIND_TOKEN:
+        return []
+    try:
+        resp = requests.get(
+            FINMIND_API,
+            params={
+                "dataset": dataset,
+                "data_id": data_id,
+                "start_date": start_date,
+                "token": FINMIND_TOKEN,
+            },
+            timeout=20,
+        )
+        resp.raise_for_status()
+        j = resp.json()
+        if j.get("status") == 200:
+            return j.get("data", [])
+        print(f"  FinMind [{dataset}] {data_id}: {j.get('msg', 'no msg')}")
+        return []
+    except Exception as exc:
+        print(f"  FinMind error [{dataset}] {data_id}: {exc}")
+        return []
 
 
-def fetch_news(max_items: int = 18) -> list:
-    """Fetch recent financial headlines from RSS feeds."""
-    news = []
-    per_feed = max(1, max_items // len(RSS_FEEDS))
-    for url in RSS_FEEDS:
-        try:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:per_feed]:
-                news.append({
-                    "title": entry.get("title", "").strip(),
-                    "summary": entry.get("summary", "")[:300].strip(),
-                    "published": entry.get("published", ""),
-                })
-        except Exception as e:
-            print(f"RSS fetch error ({url}): {e}")
-    return news[:max_items]
+def _safe_float(val, decimals: int = 1):
+    """Parse float and round; return None on failure or non-positive."""
+    try:
+        f = float(val)
+        if f == 0:
+            return None
+        return round(f, decimals)
+    except (TypeError, ValueError):
+        return None
 
 
-def fetch_sector_data(sectors: list) -> list:
-    """Fetch yfinance data for each sector's representative stocks."""
-    result = []
-    for sector in sectors:
-        stocks = []
-        for ticker_str in sector["tickers"]:
-            try:
-                t = yf.Ticker(ticker_str)
-                info = t.info
-                hist = t.history(period="1y")
+def fetch_stock_fundamentals(ticker_id: str, ticker_name: str) -> dict:
+    """
+    Fetch PE, PB, EPS, ROE, debt_ratio from FinMind for one Taiwan stock.
+    All five fields may be None if unavailable.
+    """
+    result = {
+        "id": ticker_id,
+        "name": ticker_name,
+        "pe": None,
+        "pb": None,
+        "eps": None,
+        "roe": None,
+        "debt_ratio": None,
+    }
 
-                # Best-effort current price
-                current_price = (
-                    info.get("currentPrice")
-                    or info.get("regularMarketPrice")
-                    or (float(hist["Close"].iloc[-1]) if not hist.empty else None)
-                )
+    today = datetime.now()
+    start_30  = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    start_400 = (today - timedelta(days=400)).strftime("%Y-%m-%d")
 
-                w52h = info.get("fiftyTwoWeekHigh")
-                w52l = info.get("fiftyTwoWeekLow")
-                pe_trailing = info.get("trailingPE")
-                pe_forward = info.get("forwardPE")
+    # ── 1. P/E and P/B ───────────────────────────────────────────────
+    per_data = _finmind_get("TaiwanStockPER", ticker_id, start_30)
+    if per_data:
+        latest = sorted(per_data, key=lambda x: x.get("date", ""))[-1]
+        result["pe"] = _safe_float(latest.get("PER"), 1)
+        result["pb"] = _safe_float(latest.get("PBR"), 2)
+    time.sleep(0.4)
 
-                pos_pct = None
-                if w52h and w52l and current_price and w52h != w52l:
-                    pos_pct = round((current_price - w52l) / (w52h - w52l) * 100, 1)
+    # ── 2. EPS and ROE from quarterly financial statements ────────────
+    fin_data = _finmind_get("TaiwanStockFinancialStatements", ticker_id, start_400)
+    if fin_data:
+        by_type: dict[str, list] = defaultdict(list)
+        for item in fin_data:
+            by_type[item.get("type", "")].append(item)
 
-                stocks.append({
-                    "ticker": ticker_str,
-                    "name": info.get("longName") or info.get("shortName") or ticker_str,
-                    "current_price": round(current_price, 2) if current_price else None,
-                    "pe_trailing": round(pe_trailing, 1) if pe_trailing else None,
-                    "pe_forward": round(pe_forward, 1) if pe_forward else None,
-                    "week52_high": round(w52h, 2) if w52h else None,
-                    "week52_low": round(w52l, 2) if w52l else None,
-                    "position_in_52w_pct": pos_pct,
-                    "market_cap_b": round(info.get("marketCap", 0) / 1e9, 1) if info.get("marketCap") else None,
-                })
-            except Exception as e:
-                stocks.append({"ticker": ticker_str, "error": str(e)})
+        # EPS
+        for key in ("EPS", "eps", "BasicEPS"):
+            items = sorted(by_type.get(key, []), key=lambda x: x.get("date", ""))
+            if items:
+                result["eps"] = _safe_float(items[-1].get("value"), 2)
+                break
 
-        result.append({
-            "name": sector["name"],
-            "desc": sector["desc"],
-            "stocks": stocks,
-        })
+        # ROE – might be stored as decimal (0.28) or percentage (28.0)
+        for key in ("ROE", "roe"):
+            items = sorted(by_type.get(key, []), key=lambda x: x.get("date", ""))
+            if items:
+                v = _safe_float(items[-1].get("value"), 4)
+                if v is not None:
+                    result["roe"] = round(v if abs(v) > 1 else v * 100, 1)
+                break
+    time.sleep(0.4)
+
+    # ── 3. Debt ratio from balance sheet ─────────────────────────────
+    bal_data = _finmind_get("TaiwanStockBalanceSheet", ticker_id, start_400)
+    if bal_data:
+        dates = sorted({d.get("date", "") for d in bal_data}, reverse=True)
+        if dates:
+            items = [d for d in bal_data if d.get("date") == dates[0]]
+            total_assets = total_liab = None
+            for item in items:
+                t = item.get("type", "")
+                v = _safe_float(item.get("value"), 0)
+                if v is None:
+                    continue
+                if t in ("TotalAssets", "Assets", "asset"):
+                    total_assets = v
+                elif t in ("TotalLiabilities", "Liabilities", "liability"):
+                    total_liab = v
+            if total_assets and total_liab and total_assets > 0:
+                result["debt_ratio"] = round(total_liab / total_assets * 100, 1)
+    time.sleep(0.4)
+
     return result
 
 
-def select_weekly_sectors() -> list:
-    week_num = datetime.now().isocalendar()[1]
-    start = (week_num * 3) % len(ALL_SECTORS)
-    selected = (ALL_SECTORS + ALL_SECTORS)[start : start + 3]  # wrap-around safe
-    return selected
+# ═══════════════════════════════════════════════════════════════════
+# Sector Selection & Holdings Detection
+# ═══════════════════════════════════════════════════════════════════
+
+def select_daily_sectors() -> list:
+    """Return today's 2 sectors using (day_of_year // 2) % 12 as start index."""
+    day_of_year = datetime.now().timetuple().tm_yday
+    start = (day_of_year // 2) % 12
+    s1 = ALL_SECTORS[start]
+    s2 = ALL_SECTORS[(start + 1) % 12]
+    return [s1, s2]
 
 
-def select_weekly_concept() -> str:
-    week_num = datetime.now().isocalendar()[1]
-    return INVESTMENT_CONCEPTS[week_num % len(INVESTMENT_CONCEPTS)]
+def get_sector_holdings(sector: dict) -> list:
+    """Return user holdings (id, name) that appear in this sector's ticker list."""
+    ticker_ids = {t["id"] for t in sector["tickers"]}
+    return [
+        {"id": hid, "name": hname}
+        for hid, hname in HOLDINGS.items()
+        if hid in ticker_ids
+    ]
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+def fetch_sectors_data(sectors: list) -> list:
+    """Fetch FinMind fundamentals for all tickers in both sectors."""
+    results = []
+    for sector in sectors:
+        companies = []
+        for ticker in sector["tickers"]:
+            print(f"    [{sector['name']}] fetching {ticker['id']} {ticker['name']}")
+            data = fetch_stock_fundamentals(ticker["id"], ticker["name"])
+            companies.append(data)
+        results.append({
+            "name": sector["name"],
+            "companies": companies,
+            "holdings": get_sector_holdings(sector),
+        })
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Claude AI Analysis
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════
 
 def _try_parse_json(raw: str) -> dict | None:
-    """Try to parse JSON, including simple repairs for truncated responses."""
-    # 1. Parse as-is
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
         pass
-    # 2. Response was cut mid-stream: try closing with common suffixes
-    for suffix in ["}", "}}", "}]}", "}]}}", "}]}}}}"]:
+    for suffix in ["}", "}}", "}]}", "}]}}", "}]}}}"]:
         try:
             return json.loads(raw + suffix)
         except json.JSONDecodeError:
             continue
-    # 3. Truncate to last complete top-level closing brace
-    last_brace = raw.rfind("}")
-    if last_brace > 0:
+    last = raw.rfind("}")
+    if last > 0:
         try:
-            return json.loads(raw[: last_brace + 1])
+            return json.loads(raw[: last + 1])
         except json.JSONDecodeError:
             pass
     return None
 
 
-def generate_report(market_data: list, news: list, sector_data: list, concept: str) -> dict:
-    """Send all collected data to Claude and receive structured JSON analysis."""
-
-    market_text = "\n".join(
-        f"- {d['label']} ({d['ticker']}): 現值 {d.get('current','N/A')}, 週漲跌 {d.get('change_pct','N/A')}%"
-        if "error" not in d
-        else f"- {d['label']}: 資料獲取失敗 ({d['error']})"
-        for d in market_data
-    )
-
-    news_text = "\n".join(
-        f"- {n['title']}: {n['summary']}" for n in news[:15]
-    )
-
+def generate_report(sectors_data: list) -> dict:
+    """Send sector fundamentals to Claude and get structured JSON analysis."""
     today = datetime.now().strftime("%Y年%m月%d日")
 
+    # Build holdings context string for the prompt
+    holdings_lines = []
+    for sd in sectors_data:
+        if sd["holdings"]:
+            names = "、".join(f"{h['name']}({h['id']})" for h in sd["holdings"])
+            holdings_lines.append(f"- {sd['name']}：{names}")
+    holdings_ctx = "\n".join(holdings_lines) if holdings_lines else "今日產業無持有個股"
+
+    data_json = json.dumps(sectors_data, ensure_ascii=False, indent=2)
+
     prompt = f"""
-你是專業的長線投資分析師，擅長基本面分析與價值投資。請根據以下數據，用**繁體中文**生成投資學習週報分析。
+你是專業的價值投資分析師，擅長台灣股市基本面研究。
+今天是 {today}。請根據以下兩個產業的基本面數據，用**繁體中文**生成產業學習日報分析。
 
-【重要分析規則】
-所有總經指標的解讀必須符合基本經濟邏輯，不能出現邏輯矛盾。常見準則：
-- 貨幣升值（例如台幣升值）→ 出口商成本上升、競爭力下降，對出口導向企業偏負面；進口商品變便宜，有助抑制通膨
-- 利率上升 → 借貸成本提高，壓抑企業獲利預期與股市本益比；但對銀行存款利差有利
-- 利率下降 → 資金成本降低，利好成長股與高負債企業；但可能反映經濟走弱的擔憂
-- VIX 上升 → 市場恐慌情緒升溫，短期波動加劇；長線投資者可視為逢低觀察機會
-- 通膨升溫 → 實質購買力下降，央行傾向升息以壓抑；對固定收益資產不利，對實物資產（黃金、房產）相對有利
-- 貿易逆差擴大 → 本國貨幣有貶值壓力，製造業競爭力可能下滑
+【今日兩個產業數據（來自 FinMind API）】
+欄位說明：pe=本益比, pb=股價淨值比, eps=每股盈餘, roe=股東權益報酬率(%), debt_ratio=負債比率(%)
+null 表示 API 資料暫時無法取得，請根據你的知識補充估算或說明。
 
-今日日期：{today}
+{data_json}
 
-【市場數據】
-{market_text}
+【用戶持有個股（若出現在今日產業中，需額外加入持有個股分析）】
+{holdings_ctx}
 
-【本週財經新聞】
-{news_text}
-
-【產業與個股數據】
-{json.dumps(sector_data, ensure_ascii=False, indent=2)}
-
-【本週投資概念】
-{concept}
-
-請嚴格輸出以下 JSON 結構（不含任何額外文字或 markdown 標記）：
+請嚴格輸出以下 JSON 結構，不含任何 markdown 標記或額外文字：
 
 {{
   "report_date": "{today}",
-  "market_summary": [
+  "sectors": [
     {{
-      "label": "指數名稱",
-      "change_pct": 數字,
-      "current": 數字,
-      "interpretation": "以長線投資者視角，一句話解讀本週走勢（20-40 字）"
+      "name": "產業名稱",
+      "intro": "產業簡介，2-3句說明商業模式與主要獲利驅動力（60-90字）",
+      "commentary": {{
+        "valuation_level": "目前整體估值水位評估，結合PE/PB數據說明（50-80字）",
+        "key_metrics": "價值投資者應重點觀察的指標與原因（50-80字）",
+        "value_perspective": "從巴菲特式價值投資角度的整體觀察與建議（80-100字）"
+      }},
+      "holdings_analysis": null
     }}
-  ],
-  "macro_events": {{
-    "bullets": ["重要事件1", "重要事件2", "重要事件3"],
-    "long_term_significance": "對長線投資者的意義（100-150 字）"
-  }},
-  "sector_trends": [
-    {{
-      "sector_name": "產業名稱",
-      "trend_description": "本週產業趨勢（80-100 字）",
-      "stocks": [
-        {{
-          "ticker": "代號",
-          "name": "公司名稱",
-          "current_price": 數字或null,
-          "pe_trailing": 數字或null,
-          "pe_5yr_avg_estimate": "根據你的知識，這家公司近5年平均本益比大約為多少？直接給數字",
-          "pe_assessment": "現在PE相較5年均值的判斷，一句話",
-          "week52_high": 數字或null,
-          "week52_low": 數字或null,
-          "position_in_52w_pct": 數字或null,
-          "price_position_label": "接近年高點／中間區間／接近年低點",
-          "valuation_verdict": "偏貴／合理／偏便宜",
-          "valuation_reason": "長線估值判斷理由（50-80 字）",
-          "key_risks": ["風險1", "風險2", "風險3"]
-        }}
-      ]
-    }}
-  ],
-  "investment_concept": {{
-    "name": "{concept}",
-    "definition": "定義（50-80 字）",
-    "calculation": "計算方式或判斷方法（可含公式）",
-    "how_to_use": "如何用於選股（100-120 字）",
-    "real_example": "以一家知名公司為例說明（80-100 字）",
-    "key_takeaway": "本週學習一句話精華"
-  }}
+  ]
+}}
+
+若某產業有用戶持有個股，請將該產業的 holdings_analysis 填入（不要留 null）：
+{{
+  "ticker": "股票代號",
+  "name": "公司名稱",
+  "analysis": "針對持有者的深度分析：目前估值是否合理、長期競爭優勢、需注意的風險、建議觀察的財務指標（150-200字）"
 }}
 """
 
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=8192,
-        temperature=0.65,
+        max_tokens=4096,
+        temperature=0.6,
         messages=[{"role": "user", "content": prompt}],
     )
 
     raw = response.content[0].text.strip()
-    # Strip markdown fences if model wraps output in ```json
     if raw.startswith("```"):
         lines = raw.splitlines()
         raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
-    # Try parsing, then attempt lightweight repairs for truncated responses
     parsed = _try_parse_json(raw)
     if parsed is not None:
         return parsed
 
-    print(f"JSON parse failed after repair attempts. Raw (first 300 chars): {raw[:300]}")
+    print(f"JSON parse failed. Raw (first 400 chars): {raw[:400]}")
     return {"_fallback_raw": raw, "report_date": today}
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════
 # HTML Email Builder
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════
+
+def _val(v, suffix="", fallback="N/A") -> str:
+    return f"{v}{suffix}" if v is not None else fallback
+
 
 def _build_fallback_html(raw_text: str, date_str: str) -> str:
-    """Render the raw Claude response as a readable HTML email when JSON parsing fails."""
     escaped = _html_lib.escape(raw_text)
-    # Convert blank lines to paragraph breaks for readability
     paragraphs = "".join(
         f"<p style='margin:0 0 12px;line-height:1.8;'>{line}</p>" if line.strip() else "<br>"
         for line in escaped.splitlines()
@@ -349,21 +434,23 @@ def _build_fallback_html(raw_text: str, date_str: str) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     return f"""<!DOCTYPE html>
 <html lang="zh-TW">
-<head><meta charset="UTF-8"><title>投資學習週報 {date_str}</title></head>
+<head><meta charset="UTF-8"><title>投資學習日報 {date_str}</title></head>
 <body style="margin:0;padding:0;background:#f3f4f6;font-family:'Helvetica Neue',Arial,'PingFang TC',sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;">
 <tr><td align="center" style="padding:20px 16px;">
-<table width="660" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+<table width="660" cellpadding="0" cellspacing="0"
+       style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
 <tr><td style="background:linear-gradient(135deg,#1e3a5f,#2563eb);padding:32px 40px;text-align:center;">
-  <div style="font-size:28px;font-weight:700;color:#fff;margin-bottom:8px;">📊 投資學習週報</div>
+  <div style="font-size:28px;font-weight:700;color:#fff;margin-bottom:8px;">📊 投資學習日報</div>
   <div style="font-size:14px;color:#bfdbfe;">{date_str}</div>
 </td></tr>
 <tr><td style="padding:32px 40px;">
   <div style="font-size:14px;color:#374151;">{paragraphs}</div>
-  <table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e5e7eb;margin-top:32px;padding-top:20px;">
+  <table width="100%" cellpadding="0" cellspacing="0"
+         style="border-top:1px solid #e5e7eb;margin-top:32px;padding-top:20px;">
   <tr><td style="text-align:center;font-size:12px;color:#9ca3af;line-height:2;">
-    本報告由 AI 輔助生成，僅供學習參考，不構成任何投資建議。<br>
-    數據來源：Yahoo Finance (yfinance) · Anthropic Claude Haiku · RSS 新聞<br>
+    本報告由 AI 輔助生成，僅供學習參考，不構成投資建議。<br>
+    數據來源：FinMind API · Anthropic Claude Haiku<br>
     生成時間：{ts}
   </td></tr>
   </table>
@@ -371,236 +458,167 @@ def _build_fallback_html(raw_text: str, date_str: str) -> str:
 </table>
 </td></tr>
 </table>
-</body>
-</html>"""
+</body></html>"""
 
 
-def _pct_color(pct):
-    if pct is None:
-        return "#6b7280"
-    return "#16a34a" if float(pct) >= 0 else "#dc2626"
+def _fundamentals_table(companies: list) -> str:
+    header = """
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="border-collapse:collapse;font-size:13px;margin-bottom:16px;">
+  <tr style="background:#1e3a5f;">
+    <td style="padding:9px 12px;color:#fff;font-weight:700;">公司</td>
+    <td style="padding:9px 12px;color:#fff;font-weight:700;text-align:right;">P/E</td>
+    <td style="padding:9px 12px;color:#fff;font-weight:700;text-align:right;">P/B</td>
+    <td style="padding:9px 12px;color:#fff;font-weight:700;text-align:right;">ROE%</td>
+    <td style="padding:9px 12px;color:#fff;font-weight:700;text-align:right;">負債比%</td>
+    <td style="padding:9px 12px;color:#fff;font-weight:700;text-align:right;">EPS</td>
+  </tr>"""
+    rows = ""
+    for i, co in enumerate(companies):
+        bg = "#ffffff" if i % 2 == 0 else "#f8fafc"
+        is_holding = co["id"] in HOLDINGS
+        name_style = "font-weight:700;color:#15803d;" if is_holding else "color:#1e3a5f;"
+        holding_badge = (
+            " <span style='font-size:10px;background:#dcfce7;color:#15803d;"
+            "padding:1px 5px;border-radius:4px;'>持有</span>"
+            if is_holding else ""
+        )
+        rows += f"""
+  <tr style="background:{bg};border-top:1px solid #f1f5f9;">
+    <td style="padding:10px 12px;{name_style}">{co['name']}({co['id']}){holding_badge}</td>
+    <td style="padding:10px 12px;text-align:right;color:#374151;">{_val(co.get('pe'), 'x')}</td>
+    <td style="padding:10px 12px;text-align:right;color:#374151;">{_val(co.get('pb'), 'x')}</td>
+    <td style="padding:10px 12px;text-align:right;color:#374151;">{_val(co.get('roe'), '%')}</td>
+    <td style="padding:10px 12px;text-align:right;color:#374151;">{_val(co.get('debt_ratio'), '%')}</td>
+    <td style="padding:10px 12px;text-align:right;color:#374151;">{_val(co.get('eps'))}</td>
+  </tr>"""
+    return header + rows + "</table>"
 
-def _pct_label(pct):
-    if pct is None:
-        return "N/A"
-    arrow = "▲" if float(pct) >= 0 else "▼"
-    return f"{arrow} {abs(float(pct)):.2f}%"
 
-VERDICT_COLOR = {"偏貴": "#dc2626", "合理": "#d97706", "偏便宜": "#16a34a"}
+def _commentary_box(commentary: dict) -> str:
+    v = commentary.get("valuation_level", "")
+    k = commentary.get("key_metrics", "")
+    p = commentary.get("value_perspective", "")
+    return f"""
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;margin-bottom:12px;">
+  <tr><td style="padding:16px 20px;">
+    <div style="font-size:12px;font-weight:700;color:#92400e;letter-spacing:1px;
+                text-transform:uppercase;margin-bottom:12px;">💡 Claude 分析</div>
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr><td style="padding:0 0 8px;">
+        <span style="font-size:12px;font-weight:700;color:#d97706;">▸ 估值水位</span><br>
+        <span style="font-size:13px;color:#374151;line-height:1.7;">{_html_lib.escape(v)}</span>
+      </td></tr>
+      <tr><td style="padding:8px 0;border-top:1px solid #fde68a;">
+        <span style="font-size:12px;font-weight:700;color:#d97706;">▸ 關鍵指標</span><br>
+        <span style="font-size:13px;color:#374151;line-height:1.7;">{_html_lib.escape(k)}</span>
+      </td></tr>
+      <tr><td style="padding:8px 0 0;border-top:1px solid #fde68a;">
+        <span style="font-size:12px;font-weight:700;color:#d97706;">▸ 價值投資觀察</span><br>
+        <span style="font-size:13px;color:#374151;line-height:1.7;">{_html_lib.escape(p)}</span>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>"""
 
 
-def build_html_email(report: dict) -> str:
+def _holdings_box(ha: dict) -> str:
+    analysis = _html_lib.escape(ha.get("analysis", ""))
+    ticker = ha.get("ticker", "")
+    name = ha.get("name", "")
+    return f"""
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;margin-bottom:12px;">
+  <tr><td style="padding:16px 20px;">
+    <div style="font-size:13px;font-weight:700;color:#15803d;margin-bottom:10px;">
+      📌 持有個股分析：{_html_lib.escape(name)} ({_html_lib.escape(ticker)})
+    </div>
+    <div style="font-size:13px;color:#374151;line-height:1.8;">{analysis}</div>
+  </td></tr>
+</table>"""
+
+
+def build_html_email(report: dict, sectors_data: list) -> str:
     if "_fallback_raw" in report:
         return _build_fallback_html(report["_fallback_raw"], report.get("report_date", ""))
 
     date_str = report.get("report_date", datetime.now().strftime("%Y年%m月%d日"))
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    # ── Helpers ──────────────────────────────────────────────────────────────
-    def td(content, style=""):
-        return f"<td style='padding:10px 12px;font-size:14px;{style}'>{content}</td>"
+    # Build a lookup: sector name → companies list (from raw FinMind data)
+    companies_by_sector = {sd["name"]: sd["companies"] for sd in sectors_data}
 
-    def section_header(title, color):
-        return (
-            f"<table width='100%' cellpadding='0' cellspacing='0' style='margin-bottom:20px;margin-top:28px;'>"
-            f"<tr><td style='border-left:4px solid {color};padding-left:12px;"
-            f"font-size:18px;font-weight:700;color:#1e3a5f;'>{title}</td></tr>"
-            f"</table>"
-        )
-
-    # ── Start HTML ────────────────────────────────────────────────────────────
     html = f"""<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>投資學習週報 {date_str}</title>
+<title>投資學習日報 {date_str}</title>
 </head>
-<body style="margin:0;padding:0;background:#f3f4f6;font-family:'Helvetica Neue',Arial,'PingFang TC','Microsoft JhengHei',sans-serif;">
+<body style="margin:0;padding:0;background:#f3f4f6;
+             font-family:'Helvetica Neue',Arial,'PingFang TC','Microsoft JhengHei',sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;">
 <tr><td align="center" style="padding:20px 16px;">
-<table width="660" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+<table width="660" cellpadding="0" cellspacing="0"
+       style="background:#ffffff;border-radius:12px;overflow:hidden;
+              box-shadow:0 2px 12px rgba(0,0,0,0.08);">
 
-<!-- ═══ HEADER ═══ -->
-<tr><td style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:32px 40px;text-align:center;">
-  <div style="font-size:11px;color:#93c5fd;letter-spacing:3px;text-transform:uppercase;margin-bottom:8px;">WEEKLY INVESTMENT REPORT</div>
-  <div style="font-size:28px;font-weight:700;color:#ffffff;margin-bottom:8px;">📊 投資學習週報</div>
-  <div style="font-size:14px;color:#bfdbfe;">{date_str} &nbsp;·&nbsp; 每週日 20:00 台北時間自動發送</div>
+<!-- HEADER -->
+<tr><td style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);
+               padding:32px 40px;text-align:center;">
+  <div style="font-size:11px;color:#93c5fd;letter-spacing:3px;
+              text-transform:uppercase;margin-bottom:8px;">DAILY INVESTMENT REPORT</div>
+  <div style="font-size:28px;font-weight:700;color:#ffffff;margin-bottom:8px;">
+    📊 投資學習日報
+  </div>
+  <div style="font-size:14px;color:#bfdbfe;">{date_str} &nbsp;·&nbsp; 每日 23:00 UTC 自動發送</div>
 </td></tr>
 
 <tr><td style="padding:32px 40px;">
 """
 
-    # ── Section 1: Market Summary ─────────────────────────────────────────────
-    html += section_header("📈 本週市場表現", "#2563eb")
-    html += """<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:8px;">
-<tr style="background:#f8fafc;">
-  <td style="padding:10px 12px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:1px;">指數</td>
-  <td style="padding:10px 12px;font-size:12px;font-weight:700;color:#6b7280;text-align:right;">現值</td>
-  <td style="padding:10px 12px;font-size:12px;font-weight:700;color:#6b7280;text-align:right;">週漲跌</td>
-  <td style="padding:10px 12px;font-size:12px;font-weight:700;color:#6b7280;">長線解讀</td>
-</tr>"""
+    # Sector blocks
+    sector_colors = ["#0369a1", "#065f46"]
+    for idx, sector_info in enumerate(report.get("sectors", [])):
+        sname = sector_info.get("name", "")
+        intro = _html_lib.escape(sector_info.get("intro", ""))
+        commentary = sector_info.get("commentary", {})
+        holdings_analysis = sector_info.get("holdings_analysis")
+        companies = companies_by_sector.get(sname, [])
+        color = sector_colors[idx % len(sector_colors)]
 
-    for i, item in enumerate(report.get("market_summary", [])):
-        bg = "#ffffff" if i % 2 == 0 else "#f8fafc"
-        pct = item.get("change_pct")
-        color = _pct_color(pct)
-        label_str = _pct_label(pct)
-        cur = item.get("current")
-        cur_str = f"{cur:,.2f}" if cur else "N/A"
-        html += f"""<tr style="background:{bg};border-top:1px solid #f1f5f9;">
-  <td style="padding:12px;font-size:14px;font-weight:700;color:#1e3a5f;">{item.get('label','')}</td>
-  <td style="padding:12px;font-size:14px;color:#374151;text-align:right;font-variant-numeric:tabular-nums;">{cur_str}</td>
-  <td style="padding:12px;font-size:14px;font-weight:700;color:{color};text-align:right;">{label_str}</td>
-  <td style="padding:12px;font-size:13px;color:#6b7280;line-height:1.6;">{item.get('interpretation','')}</td>
-</tr>"""
-
-    html += "</table>"
-
-    # ── Section 2: Macro Events ───────────────────────────────────────────────
-    macro = report.get("macro_events", {})
-    html += section_header("🌐 本週重要總經事件", "#7c3aed")
-
-    bullets_html = "".join(
-        f"<tr><td style='padding:6px 0;font-size:14px;color:#374151;line-height:1.7;'>"
-        f"<span style='color:#7c3aed;font-weight:700;margin-right:6px;'>•</span>{b}</td></tr>"
-        for b in macro.get("bullets", [])
-    )
-    html += f"""<table width="100%" cellpadding="0" cellspacing="0" style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:16px 20px;margin-bottom:12px;">
-<tr><td><table width="100%" cellpadding="0" cellspacing="0">{bullets_html}</table></td></tr>
-</table>
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:8px;">
-<tr><td style="padding:16px 20px;">
-  <div style="font-size:12px;font-weight:700;color:#2563eb;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">💡 對長線投資者的意義</div>
-  <div style="font-size:14px;color:#374151;line-height:1.7;">{macro.get('long_term_significance','')}</div>
-</td></tr>
+        html += f"""
+<!-- SECTOR: {_html_lib.escape(sname)} -->
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="border:1px solid #e5e7eb;border-radius:10px;
+              margin-bottom:28px;overflow:hidden;">
+  <!-- sector header -->
+  <tr><td style="background:{color};padding:16px 24px;">
+    <div style="font-size:17px;font-weight:700;color:#ffffff;">🏭 {_html_lib.escape(sname)}</div>
+  </td></tr>
+  <!-- intro -->
+  <tr><td style="background:#f8fafc;padding:14px 24px;
+                 border-bottom:1px solid #e5e7eb;">
+    <div style="font-size:13px;color:#374151;line-height:1.8;">{intro}</div>
+  </td></tr>
+  <!-- table + commentary + holdings -->
+  <tr><td style="padding:20px 24px;">
+    {_fundamentals_table(companies)}
+    {_commentary_box(commentary)}
+    {_holdings_box(holdings_analysis) if holdings_analysis else ""}
+  </td></tr>
 </table>"""
 
-    # ── Section 3: Sector Trends ──────────────────────────────────────────────
-    html += section_header("🏭 本週產業趨勢與個股分析", "#059669")
-
-    for sector in report.get("sector_trends", []):
-        html += f"""<table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:10px;margin-bottom:20px;overflow:hidden;">
-<tr><td style="background:#f0fdf4;padding:16px 20px;border-bottom:1px solid #d1fae5;">
-  <div style="font-size:16px;font-weight:700;color:#065f46;">🏷 {sector.get('sector_name','')}</div>
-  <div style="font-size:13px;color:#374151;margin-top:6px;line-height:1.6;">{sector.get('trend_description','')}</div>
-</td></tr>
-<tr><td style="padding:16px 20px;">"""
-
-        for stock in sector.get("stocks", []):
-            verdict = stock.get("valuation_verdict", "")
-            vcolor = VERDICT_COLOR.get(verdict, "#6b7280")
-
-            pe_t = stock.get("pe_trailing")
-            pe_5 = stock.get("pe_5yr_avg_estimate")
-            pe_str = f"{pe_t:.1f}x" if pe_t else "N/A"
-            pe5_str = f"（5年均值估 {pe_5}x）" if pe_5 else ""
-
-            w52h = stock.get("week52_high")
-            w52l = stock.get("week52_low")
-            pos = stock.get("position_in_52w_pct")
-            range_str = f"{w52l} ~ {w52h}" if w52h and w52l else "N/A"
-            pos_str = f"，目前在年內區間 <strong>{pos:.0f}%</strong> 位置" if pos is not None else ""
-            pos_label = stock.get("price_position_label", "")
-
-            risks = stock.get("key_risks", [])
-            risks_html = "".join(
-                f"<span style='display:inline-block;background:#fff8f1;border:1px solid #fed7aa;"
-                f"border-radius:4px;padding:2px 8px;font-size:12px;color:#c2410c;margin:2px 4px 2px 0;'>{r}</span>"
-                for r in (risks if isinstance(risks, list) else [risks])
-            )
-            pe_assess = stock.get("pe_assessment", "")
-            val_reason = stock.get("valuation_reason", "")
-
-            html += f"""<table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:8px;margin-bottom:12px;">
-<tr>
-  <td style="padding:14px 16px;">
-    <table width="100%" cellpadding="0" cellspacing="0">
-      <tr>
-        <td>
-          <span style="font-size:16px;font-weight:700;color:#1e3a5f;">{stock.get('ticker','')}</span>
-          <span style="font-size:13px;color:#6b7280;margin-left:8px;">{stock.get('name','')}</span>
-        </td>
-        <td align="right">
-          <span style="background:{vcolor};color:#fff;font-size:12px;font-weight:700;padding:3px 12px;border-radius:20px;">{verdict}</span>
-        </td>
-      </tr>
-    </table>
-    <!-- PE Row -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;">
-      <tr>
-        <td width="50%" style="font-size:13px;color:#374151;padding-right:8px;">
-          <span style="color:#6b7280;">📊 本益比：</span><strong>{pe_str}</strong> {pe5_str}
-        </td>
-        <td width="50%" style="font-size:13px;color:#374151;">
-          <span style="color:#6b7280;">📉 52週區間：</span>{range_str}
-        </td>
-      </tr>
-      <tr>
-        <td style="font-size:13px;color:#6b7280;padding-top:4px;">{pe_assess}</td>
-        <td style="font-size:13px;color:#6b7280;padding-top:4px;">{pos_label}{pos_str}</td>
-      </tr>
-    </table>
-    <!-- Valuation reason -->
-    <div style="font-size:13px;color:#374151;line-height:1.7;margin-top:10px;">
-      <span style="font-weight:700;color:#065f46;">💬 估值理由：</span>{val_reason}
-    </div>
-    <!-- Risks -->
-    <div style="margin-top:10px;">
-      <span style="font-size:12px;font-weight:700;color:#d97706;">⚠ 主要風險：</span>
-      <div style="margin-top:4px;">{risks_html}</div>
-    </div>
-  </td>
-</tr>
-</table>"""
-
-        html += "</td></tr></table>"
-
-    # ── Section 4: Investment Concept ─────────────────────────────────────────
-    concept = report.get("investment_concept", {})
-    html += section_header("📚 本週投資概念學習", "#d97706")
-
-    def concept_row(icon, label, content):
-        return (
-            f"<tr><td style='padding:14px 0;border-top:1px solid #fde68a;'>"
-            f"<div style='font-size:12px;font-weight:700;color:#d97706;text-transform:uppercase;"
-            f"letter-spacing:1px;margin-bottom:6px;'>{icon} {label}</div>"
-            f"<div style='font-size:14px;color:#374151;line-height:1.7;'>{content}</div>"
-            f"</td></tr>"
-        )
-
-    calc_content = concept.get("calculation", "")
-    calc_html = f"<code style='font-family:monospace;background:#fffbeb;padding:8px 12px;border-radius:6px;border:1px solid #fde68a;display:block;white-space:pre-wrap;font-size:13px;color:#92400e;'>{calc_content}</code>"
-
-    html += f"""<table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #fde68a;border-radius:10px;overflow:hidden;">
-<tr><td style="background:linear-gradient(135deg,#78350f,#d97706);padding:16px 24px;">
-  <div style="font-size:17px;font-weight:700;color:#ffffff;">{concept.get('name','')}</div>
-</td></tr>
-<tr><td style="background:#fffbeb;padding:20px 24px;">
-  <table width="100%" cellpadding="0" cellspacing="0">
-    {concept_row("📖", "定義", concept.get("definition", ""))}
-    {concept_row("🔢", "計算方式", calc_html)}
-    {concept_row("🎯", "如何應用於選股", concept.get("how_to_use", ""))}
-    {concept_row("💼", "實際案例", concept.get("real_example", ""))}
-    <tr><td style="padding-top:16px;">
-      <table width="100%" cellpadding="0" cellspacing="0" style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;">
-        <tr><td style="padding:14px 16px;">
-          <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:6px;">💡 本週重點</div>
-          <div style="font-size:14px;font-weight:600;color:#78350f;line-height:1.6;">{concept.get("key_takeaway", "")}</div>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</td></tr>
-</table>"""
-
-    # ── Footer ────────────────────────────────────────────────────────────────
+    # Footer
     html += f"""
-<table width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e5e7eb;margin-top:32px;padding-top:20px;">
-<tr><td style="text-align:center;font-size:12px;color:#9ca3af;line-height:2;">
-  本報告由 AI 輔助生成，僅供學習參考，不構成任何投資建議。<br>
-  數據來源：Yahoo Finance (yfinance) · Anthropic Claude Haiku · RSS 新聞<br>
-  生成時間：{datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
-</td></tr>
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="border-top:1px solid #e5e7eb;margin-top:16px;padding-top:20px;">
+  <tr><td style="text-align:center;font-size:12px;color:#9ca3af;line-height:2;">
+    本報告由 AI 輔助生成，僅供學習參考，不構成任何投資建議。<br>
+    數據來源：FinMind API · Anthropic Claude Haiku<br>
+    生成時間：{ts}
+  </td></tr>
 </table>
 
 </td></tr>
@@ -613,9 +631,9 @@ def build_html_email(report: dict) -> str:
     return html
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════
 # Email Sender
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════
 
 def send_email(html_content: str, subject: str) -> None:
     msg = MIMEMultipart("alternative")
@@ -623,7 +641,7 @@ def send_email(html_content: str, subject: str) -> None:
     msg["From"]    = GMAIL_USER
     msg["To"]      = RECIPIENT_EMAIL
 
-    msg.attach(MIMEText("請使用支援 HTML 的郵件客戶端查看本週報。", "plain", "utf-8"))
+    msg.attach(MIMEText("請使用支援 HTML 的郵件客戶端查看本日報。", "plain", "utf-8"))
     msg.attach(MIMEText(html_content, "html", "utf-8"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
@@ -633,37 +651,29 @@ def send_email(html_content: str, subject: str) -> None:
     print(f"✅ Email sent → {RECIPIENT_EMAIL}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════
 # Main
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════
 
 def main():
-    print(f"🚀 Weekly report starting at {datetime.now(timezone.utc).isoformat()}")
+    print(f"🚀 Daily report starting at {datetime.now(timezone.utc).isoformat()}")
 
-    print("  [1/5] Fetching market data...")
-    market_data = fetch_market_data()
+    print("  [1/4] Selecting today's sectors...")
+    sectors = select_daily_sectors()
+    day_of_year = datetime.now().timetuple().tm_yday
+    print(f"        Day {day_of_year} → sectors: {[s['name'] for s in sectors]}")
 
-    print("  [2/5] Fetching news RSS...")
-    news = fetch_news()
+    print("  [2/4] Fetching FinMind fundamentals...")
+    sectors_data = fetch_sectors_data(sectors)
 
-    print("  [3/5] Selecting sectors & concept...")
-    sectors = select_weekly_sectors()
-    concept = select_weekly_concept()
-    print(f"        Sectors: {[s['name'] for s in sectors]}")
-    print(f"        Concept: {concept}")
+    print("  [3/4] Generating AI analysis (Claude Haiku)...")
+    report = generate_report(sectors_data)
 
-    print("  [4/5] Fetching sector stock data...")
-    sector_data = fetch_sector_data(sectors)
+    print("  [4/4] Building HTML and sending email...")
+    html = build_html_email(report, sectors_data)
 
-    print("  [5/5] Generating AI analysis (Claude Haiku)...")
-    report = generate_report(market_data, news, sector_data, concept)
-
-    html = build_html_email(report)
-
-    week_num = datetime.now().isocalendar()[1]
-    date_str  = datetime.now().strftime("%Y/%m/%d")
-    subject   = f"📊 投資學習週報 W{week_num:02d} | {date_str}"
-
+    date_str = datetime.now().strftime("%Y/%m/%d")
+    subject  = f"📊 投資學習日報 | {date_str} | {' & '.join(s['name'] for s in sectors)}"
     send_email(html, subject)
     print("✅ Done.")
 
