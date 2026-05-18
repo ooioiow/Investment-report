@@ -1,4 +1,4 @@
-name: Weekly Investment Report
+name: Value Investing Daily Report
 
 on:
   schedule:
@@ -32,4 +32,4 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           RECIPIENT_EMAIL:    ${{ secrets.RECIPIENT_EMAIL }}
           FINMIND_TOKEN:      ${{ secrets.FINMIND_TOKEN }}
-        run: python weekly_report.py
+        run: python value_investing_report.py

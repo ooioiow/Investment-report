@@ -1,0 +1,36 @@
+name: Technical Analysis Daily Report
+
+on:
+  schedule:
+    # Every day at 23:30 UTC
+    # US market closes ~21:00-22:00 UTC; Taiwan market closes ~05:30 UTC
+    # 23:30 UTC ensures end-of-day data is available for both markets
+    - cron: '30 23 * * *'
+  # Allow manual trigger from Actions tab for testing
+  workflow_dispatch:
+
+jobs:
+  send-technical-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily technical analysis report
+        env:
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          GMAIL_USER:         ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT_EMAIL:    ${{ secrets.RECIPIENT_EMAIL }}
+        run: python technical_report.py
