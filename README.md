@@ -1,16 +1,20 @@
 # 投資自動報告系統
 
-本 repo 包含兩個獨立的自動化報告系統，透過 GitHub Actions 定時執行，用 Gmail SMTP 寄送 HTML 格式郵件。
+以 GitHub Actions 排程，串接 Yahoo Finance（yfinance）與 FinMind 市場數據及 Claude API，每日自動產出投資分析報告，並透過 Gmail SMTP 寄送 HTML 格式郵件。本 repo 包含三個獨立的報告：
 
 ```
 .
-├── value_investing_report.py          # 價值投資日報（主程式）
-├── technical_report.py                # 技術分析日報（主程式）
+├── daily_report.py                    # 每日投資學習報告（持股追蹤、產業輪動、熱點產業）
+├── value_investing_report.py          # 價值投資日報
+├── technical_report.py                # 技術分析日報
 ├── requirements.txt
 └── .github/workflows/
+    ├── daily_report.yml               # 每日 23:00 UTC 排程
     ├── value_investing_report.yml     # 每日 23:00 UTC 排程
-    └── technical_report.yml          # 每日 23:30 UTC 排程
+    └── technical_report.yml           # 每日 23:30 UTC 排程
 ```
+
+> 專案心得：實際運行後發現，AI 產出的分析常常看起來合理、但推論有誤，因此數據與邏輯仍需人工核對。
 
 ---
 
